@@ -1,26 +1,54 @@
+from typing import Final
+
 import httpx
 from fastapi import HTTPException
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from fastmcp import FastMCP
 from fastmcp.server.auth.providers.bearer_novalidate import BearerNoValidateAuthProvider
 from fastmcp.server.dependencies import get_http_request
 
 
-# Create a custom HTTP client factory that uses the current request's token
-def create_authenticated_client():
-    # Get the current request context to access the bearer token
-    # request_context = get_request_context()
-    request = get_http_request()
-    bearer_token = request.headers.get("Authorization")
-    if bearer_token is None:
-        print("Unauthorized request: No bearer token found")
-        raise HTTPException(status_code=401, detail="No bearer token found")
+class Settings(BaseSettings):
+    CASHMERE_API_KEY: str
+    CASHMERE_MCP_SERVER_URL: str
+    CASHMERE_API_URL: str
+    model_config = SettingsConfigDict(env_file=".env.local", extra="ignore")
 
-    # access_token = "d8db5e301f5d876c2ae775aa841503e08f7979385e07244fcf7c16883b00560a" #get_access_token()  # This is the token from the MCP client
-    # print(f"Token: {token}")
-    return httpx.AsyncClient(
-        base_url="https://cashmere.io/api/v1", headers={"Authorization": bearer_token}
-    )
+
+settings = Settings()
+
+# Use one shared client for *all* requests.
+HTTP_TIMEOUT: Final = httpx.Timeout(30.0, connect=5.0, read=30.0)
+HTTP_LIMITS: Final = httpx.Limits(
+    max_connections=2048,  # hard cap
+    max_keepalive_connections=512,  # pool size
+)
+_shared_client: httpx.AsyncClient | None = None
+
+
+def _get_shared_client() -> httpx.AsyncClient:
+    global _shared_client
+    if _shared_client is None or _shared_client.is_closed:
+        _shared_client = httpx.AsyncClient(
+            base_url=settings.CASHMERE_API_URL,
+            timeout=HTTP_TIMEOUT,
+            limits=HTTP_LIMITS,
+            # Don’t set Authorization here; we’ll inject it per-request.
+        )
+    return _shared_client
+
+
+def create_authenticated_client():
+    """
+    Return the _shared_ AsyncClient plus a header dict containing the caller’s bearer
+    token.  Tools pass that header when they invoke .get/.post.
+    """
+    request = get_http_request()
+    bearer = request.headers.get("Authorization")
+    if bearer is None:
+        raise HTTPException(status_code=401, detail="No bearer token found")
+    return _get_shared_client(), {"Authorization": bearer}
 
 
 auth = BearerNoValidateAuthProvider()
@@ -34,9 +62,9 @@ mcp = FastMCP(
 
 @mcp.tool
 async def search_publications(query: str):
-    async with create_authenticated_client() as client:
-        resp = await client.get(f"/semantic-search?q={query}")
-        return resp.json()
+    client, hdrs = create_authenticated_client()
+    resp = await client.get("/semantic-search", params={"q": query}, headers=hdrs)
+    return resp.json()
 
 
 print(f"search_publications registered (id(mcp)={id(mcp)})")
