@@ -3,6 +3,8 @@ from typing import Final
 import httpx
 from fastapi import HTTPException
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import JSONResponse
 
 from fastmcp import FastMCP
 from fastmcp.server.auth.providers.bearer_novalidate import BearerNoValidateAuthProvider
@@ -10,10 +12,8 @@ from fastmcp.server.dependencies import get_http_request
 
 
 class Settings(BaseSettings):
-    CASHMERE_API_KEY: str
-    CASHMERE_MCP_SERVER_URL: str
     CASHMERE_API_URL: str
-    model_config = SettingsConfigDict(env_file=".env.local", extra="ignore")
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 
 settings = Settings()
@@ -53,11 +53,26 @@ def create_authenticated_client():
 
 auth = BearerNoValidateAuthProvider()
 
+
+# OAuth 2.0 Protected Resource Metadata (RFC 9728)
+OAUTH_PR_METADATA = {
+    "resource": "https://cashmere.io/api/v1/docs",
+    "authorization_servers": ["https://cashmere.io"],
+    "bearer_methods_supported": ["header"],
+    "resource_name": "Cashmere API",
+}
+
 # Create MCP server with authentication
 mcp = FastMCP(
     name="Cashmere MCP Server",
-    auth_provider=auth,
+    auth=auth,
 )
+
+
+# Well‑known endpoint for OAuth 2.0 Protected Resource Metadata
+@mcp.custom_route("/.well-known/oauth-protected-resource", methods=["GET"])
+async def oauth_pr_metadata(_):
+    return JSONResponse(OAUTH_PR_METADATA)
 
 
 @mcp.tool
@@ -65,9 +80,6 @@ async def search_publications(query: str):
     client, hdrs = create_authenticated_client()
     resp = await client.get("/semantic-search", params={"q": query}, headers=hdrs)
     return resp.json()
-
-
-print(f"search_publications registered (id(mcp)={id(mcp)})")
 
 
 @mcp.tool
@@ -93,17 +105,11 @@ async def list_publications(
         return truncated_response
 
 
-print(f"list_publications registered (id(mcp)={id(mcp)})")
-
-
 @mcp.tool
 async def get_publication(publication_id: str):
     client, hdrs = create_authenticated_client()
     resp = await client.get(f"/book/{publication_id}", headers=hdrs)
     return resp.json()
-
-
-print(f"get_publication registered (id(mcp)={id(mcp)})")
 
 
 @mcp.tool
@@ -118,15 +124,12 @@ async def list_collections(limit: int | None = None, offset: int | None = None):
     return resp.json()
 
 
-print(f"list_collections registered (id(mcp)={id(mcp)})")
-
 # TODO: Implement get_collection
 # @mcp.tool
 # async def get_collection(collection_id: int):
 #     async with create_authenticated_client() as client:
 #         resp = await client.get(f"/collection/{collection_id}")
 #         return resp.json()
-# print(f"get_collection registered (id(mcp)={id(mcp)})")
 
 # TODO: Implement get_usage_report
 # @mcp.tool
@@ -137,7 +140,23 @@ print(f"list_collections registered (id(mcp)={id(mcp)})")
 #             params['userId'] = userId
 #         resp = await client.get("/usage-report", params=params)
 #         return resp.json()
-# print(f"get_usage_report registered (id(mcp)={id(mcp)})")
+
+
+# Add WWW-Authenticate hint for OAuth-protected resource metadata
+class MetadataHint(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        response = await call_next(request)
+        if response.status_code == 401:
+            response.headers["WWW-Authenticate"] = (
+                'Bearer resource="https://cashmere.io/api/v1/docs", '
+                'authorization_uri="https://mcp.cashmere.io/.well-known/oauth-protected-resource"'
+            )
+        return response
+
+
+# Attach the middleware to the underlying Starlette app
+app = mcp.http_app()
+app.add_middleware(MetadataHint)
 
 if __name__ == "__main__":
     mcp.run(transport="streamable-http", host="0.0.0.0", port=8001)
