@@ -75,19 +75,70 @@ async def oauth_pr_metadata(_):
     return JSONResponse(OAUTH_PR_METADATA)
 
 
-@mcp.tool
+@mcp.tool(
+    description=(
+        "Search publications by semantic relevance. "
+        "Returns a ranked list of books matching the provided "
+        "natural‑language query."
+    ),
+    tags={"search", "publications", "read"},
+    annotations={
+        "title": "Search Publications",
+        "readOnlyHint": True,
+        "openWorldHint": True,
+    },
+)
 async def search_publications(query: str):
+    """Proxy for `GET /semantic-search` on the Cashmere API.
+
+    Parameters
+    ----------
+    query : str
+        Free‑form text used for semantic search.
+
+    Returns
+    -------
+    dict
+        JSON response from the Cashmere API containing ranked publications.
+    """
     client, hdrs = create_authenticated_client()
     resp = await client.get("/semantic-search", params={"q": query}, headers=hdrs)
     return resp.json()
 
 
-@mcp.tool
+@mcp.tool(
+    description=(
+        "List publications visible to the caller with optional "
+        "pagination and optional filtering by collection."
+    ),
+    tags={"publications", "list", "read"},
+    annotations={
+        "title": "List Publications",
+        "readOnlyHint": True,
+        "openWorldHint": True,
+    },
+)
 async def list_publications(
     limit: int | None = None,
     offset: int | None = None,
     collection_id: int | None = None,
 ):
+    """Proxy for `GET /books` on the Cashmere API.
+
+    Parameters
+    ----------
+    limit : int | None
+        Maximum number of items to return.
+    offset : int | None
+        Pagination offset.
+    collection_id : int | None
+        Restrict results to a specific collection ID.
+
+    Returns
+    -------
+    dict
+        A trimmed JSON response (with large `data.nav` fields removed).
+    """
     client, hdrs = create_authenticated_client()
     params = {}
     if limit is not None:
@@ -105,15 +156,62 @@ async def list_publications(
         return truncated_response
 
 
-@mcp.tool
+@mcp.tool(
+    description=(
+        "Fetch detailed metadata (and, where permitted, content) "
+        "for a single publication identified by its UID."
+    ),
+    tags={"publication", "read"},
+    annotations={
+        "title": "Get Publication",
+        "readOnlyHint": True,
+        "openWorldHint": True,
+    },
+)
 async def get_publication(publication_id: str):
+    """Proxy for `GET /book/{publication_id}` on the Cashmere API.
+
+    Parameters
+    ----------
+    publication_id : str
+        Unique identifier of the publication to retrieve.
+
+    Returns
+    -------
+    dict
+        Full JSON payload for the specified publication.
+    """
     client, hdrs = create_authenticated_client()
     resp = await client.get(f"/book/{publication_id}", headers=hdrs)
     return resp.json()
 
 
-@mcp.tool
+@mcp.tool(
+    description=(
+        "List collections available to the caller with optional pagination controls."
+    ),
+    tags={"collections", "list", "read"},
+    annotations={
+        "title": "List Collections",
+        "readOnlyHint": True,
+        "openWorldHint": True,
+    },
+)
 async def list_collections(limit: int | None = None, offset: int | None = None):
+    """Proxy for `GET /collections` on the Cashmere API.
+
+    Parameters
+    ----------
+    limit : int | None
+        Maximum number of collections to return.
+    offset : int | None
+        Pagination offset.
+
+    Returns
+    -------
+    dict
+        JSON response listing collections.
+    """
     client, hdrs = create_authenticated_client()
     params = {}
     if limit is not None:
