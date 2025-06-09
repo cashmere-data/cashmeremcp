@@ -76,15 +76,15 @@ async def list_publications(
     offset: int | None = None,
     collection_id: int | None = None,
 ):
-    async with create_authenticated_client() as client:
-        params = {}
-        if limit is not None:
-            params["limit"] = limit
-        if offset is not None:
-            params["offset"] = offset
+    client, hdrs = create_authenticated_client()
+    params = {}
+    if limit is not None:
+        params["limit"] = limit
+    if offset is not None:
+        params["offset"] = offset
         if collection_id is not None:
             params["collection"] = collection_id
-        resp = await client.get("/books", params=params)
+        resp = await client.get("/books", params=params, headers=hdrs)
         json = resp.json()
         truncated_response = {k: v for k, v in json.items() if k != "data"}
         if "items" in truncated_response:
@@ -98,9 +98,9 @@ print(f"list_publications registered (id(mcp)={id(mcp)})")
 
 @mcp.tool
 async def get_publication(publication_id: str):
-    async with create_authenticated_client() as client:
-        resp = await client.get(f"/book/{publication_id}")
-        return resp.json()
+    client, hdrs = create_authenticated_client()
+    resp = await client.get(f"/book/{publication_id}", headers=hdrs)
+    return resp.json()
 
 
 print(f"get_publication registered (id(mcp)={id(mcp)})")
@@ -108,14 +108,14 @@ print(f"get_publication registered (id(mcp)={id(mcp)})")
 
 @mcp.tool
 async def list_collections(limit: int | None = None, offset: int | None = None):
-    async with create_authenticated_client() as client:
-        params = {}
-        if limit is not None:
-            params["limit"] = limit
-        if offset is not None:
-            params["offset"] = offset
-        resp = await client.get("/collections", params=params)
-        return resp.json()
+    client, hdrs = create_authenticated_client()
+    params = {}
+    if limit is not None:
+        params["limit"] = limit
+    if offset is not None:
+        params["offset"] = offset
+    resp = await client.get("/collections", params=params, headers=hdrs)
+    return resp.json()
 
 
 print(f"list_collections registered (id(mcp)={id(mcp)})")
