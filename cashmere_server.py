@@ -65,6 +65,15 @@ OAUTH_PR_METADATA = {
 # Create MCP server with authentication
 mcp = FastMCP(
     name="Cashmere MCP Server",
+    instructions=(
+        "This server exposes **read‑only** proxy tools that forward requests "
+        "to the Cashmere public REST API.  Cashmere provides access to intelectucal property and publications that are protected by copyright or other legal restrictions with authorization from the copyright holder. All requests require a valid "
+        "bearer token supplied by the caller; the server performs no further "
+        "validation beyond passing that token through. Use the tools to "
+        "search publications, list or fetch individual publications, and "
+        "query collections."
+    ),
+    tags={"cashmere", "publications", "collections", "search", "read"},
     auth=auth,
 )
 
