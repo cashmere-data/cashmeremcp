@@ -22,6 +22,7 @@ venv/
 env/
 ENV/
 .env
+.env*
 
 # System files
 .DS_Store
