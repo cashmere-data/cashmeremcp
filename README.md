@@ -1,3 +1,50 @@
+# Cashmere MCP Server
+
+This is a simple MCP server that proxies requests to the Cashmere public REST API. It is built using FastMCP, a high-level framework for building MCP servers and clients. Follow the [installation instructions](/#installation) to get started.
+
+Once you have things installed, you can run the server with the following command:
+
+```bash
+python cashmere_server.py
+```
+
+The server will run on `http://localhost:8001` by default.
+
+# Test the server tools
+
+Included with this repo is a simple mcp client that can be used to test the server tools.
+
+You can test the server tools using the following commands:
+
+```bash
+python cashmere_client.py --mode test_all
+```
+
+There is a load test to test the server's ability to handle multiple requests at once. Run it with:
+
+```bash
+python cashmere_client.py --mode load --num_requests 100 --concurrency 10
+```
+
+There is a test to measure the server's ability to handle a high number of requests. Run it with:
+
+```bash
+python cashmere_client.py --mode rps
+```
+
+If you just want to list the tools, run:
+
+```bash
+python cashmere_client.py --mode list_tools
+```
+
+And finally, you can also list the resources, but there aren't any static resources now:
+
+```bash
+python cashmere_client.py --mode list_resources
+```
+
+
 <div align="center">
 
 <!-- omit in toc -->
