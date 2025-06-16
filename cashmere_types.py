@@ -46,6 +46,8 @@ class Collection(TypedDict):
     owner_id: int
     created_at: str
     updated_at: str
+    pubs_count: int
+    get_pubs_url: str
 
 
 class CollectionsResponse(TypedDict):

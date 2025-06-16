@@ -1,6 +1,7 @@
 import asyncio
 import json as pyjson
 import random
+import sys
 import time
 
 from mcp.types import TextContent
@@ -116,7 +117,7 @@ async def list_collections(
         return collections[0] if collections else None
 
 
-async def get_collection(collection_id: str) -> Collection:
+async def get_collection(collection_id: int) -> Collection:
     client = create_authenticated_client()
     async with client:
         collection = await client.call_tool(
@@ -151,26 +152,32 @@ async def test_all_tools():
     collections = await list_collections()
     list_collections_elapsed = time.time() - list_collections_start
     print(
-        f"[list_collections] found {len(collections) if collections else 0} collections in {list_collections_elapsed:.2f} seconds"
+        f"[list_collections] found {collections['count']} collections in {list_collections_elapsed:.2f} seconds"
     )
 
     if not collections.get("items"):
         print("No collections found, cannot proceed with remaining tests")
         return
+    collection_id = [c["id"] for c in collections["items"] if c["pubs_count"] > 0][0]
+    if not collection_id:
+        print(
+            "No collections with publications found, cannot proceed with remaining tests"
+        )
+        return
 
-    # TODO: Implement get_collection
-    # collection_start = time.time()
-    # collection = await get_collection(collections['items'][0]['id'])
-    # collection_elapsed = time.time() - collection_start
-    # print(f"[get_collection] retrieved in {collection_elapsed:.2f} seconds")
-    # print(f"collection: {collection}")
+    collection_start = time.time()
+    collection = await get_collection(collection_id)
+    collection_elapsed = time.time() - collection_start
+    print(
+        f"[get_collection] {collection_id} {collection['name']} retrieved in {collection_elapsed:.2f} seconds"
+    )
 
     # Time list_publications
     list_pubs_start = time.time()
-    publications = await list_publications(collection_id=collections["items"][0]["id"])
+    publications = await list_publications(collection_id=collection_id)
     list_pubs_elapsed = time.time() - list_pubs_start
     print(
-        f"[list_publications] found {len(publications) if publications else 0} publications in {list_pubs_elapsed:.2f} seconds"
+        f"[list_publications] found {publications['count'] if publications else 0} publications in {list_pubs_elapsed:.2f} seconds"
     )
 
     if not publications or not publications.get("items"):
@@ -519,6 +526,33 @@ async def load_test(
             print(f"    Latency (p99): {p99:.2f}ms")
 
 
+async def test_tool(
+    tool: str, collection_id: int | None, publication_id: str | None, query: str
+):
+    response = None
+    if tool == "search_publications":
+        if query is None:
+            raise ValueError("query is required for search_publications")
+        response = await search_publications(query)
+    elif tool == "list_publications":
+        response = await list_publications(collection_id)
+    elif tool == "get_publication":
+        if publication_id is None:
+            raise ValueError("publication_id is required for get_publication")
+        response = await get_publication(publication_id)
+    elif tool == "list_collections":
+        response = await list_collections()
+    elif tool == "get_collection":
+        if collection_id is None:
+            raise ValueError("collection_id is required for get_collection")
+        response = await get_collection(collection_id)
+    elif tool == "get_usage_report":
+        response = await get_usage_report(None)
+    else:
+        raise ValueError(f"Unknown tool: {tool}")
+    return print(f"[test_tool] {tool}: {pyjson.dumps(response, indent=2)}")
+
+
 # Entrypoint for command-line usage
 if __name__ == "__main__":
     import argparse
@@ -529,8 +563,35 @@ if __name__ == "__main__":
     parser.add_argument(
         "--mode",
         choices=["load", "rps", "test_all", "list", "resources"],
-        default="load",
         help="Which helper to run (default: load)",
+    )
+    parser.add_argument(
+        "--tool",
+        choices=[
+            "search_publications",
+            "list_publications",
+            "get_publication",
+            "list_collections",
+            "get_collection",
+        ],
+        help="Which tool to test (default: search_publications)",
+    )
+    parser.add_argument(
+        "--collection_id",
+        type=int,
+        default=None,
+        help="Collection ID to use for list_publications and get_publication tests",
+    )
+    parser.add_argument(
+        "--publication_id",
+        type=str,
+        default=None,
+        help="Publication ID to use for get_publication tests",
+    )
+    parser.add_argument(
+        "--query",
+        type=str,
+        help="Query to use for search_publications tests",
     )
     parser.add_argument(
         "--requests",
@@ -552,7 +613,14 @@ if __name__ == "__main__":
         asyncio.run(test_requests_per_second())
     elif args.mode == "test_all":
         asyncio.run(test_all_tools())
-    elif args.mode == "list":
+    elif args.mode == "list_tools":
         asyncio.run(list_tools())
-    elif args.mode == "resources":
+    elif args.mode == "list_resources":
         asyncio.run(list_resources())
+    elif args.tool:
+        asyncio.run(
+            test_tool(args.tool, args.collection_id, args.publication_id, args.query)
+        )
+    else:
+        parser.print_help()
+        sys.exit(1)
