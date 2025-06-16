@@ -67,10 +67,14 @@ async def list_resources():
         print("\n".join(f"  - {r.uri}" for r in resources))
 
 
-async def search_publications(query: str) -> SearchPublicationsResponse:
+async def search_publications(
+    query: str, external_ids: str | list[str] | None = None
+) -> SearchPublicationsResponse:
     client = create_authenticated_client()
     async with client:
-        publications = await client.call_tool("search_publications", {"query": query})
+        publications = await client.call_tool(
+            "search_publications", {"query": query, "external_ids": external_ids}
+        )
         publications = parse_json_content(publications)
         print(
             f"[search_publications] Publications: {len(publications[0]) if publications else 0}"
@@ -127,10 +131,12 @@ async def get_collection(collection_id: int) -> Collection:
         return collection[0] if collection else None
 
 
-async def get_usage_report(userId: str | None):
+async def get_usage_report_summary(external_ids: str | list[str] | None = None):
     client = create_authenticated_client()
     async with client:
-        usage_report = await client.call_tool("get_usage_report", {"userId": userId})
+        usage_report = await client.call_tool(
+            "get_usage_report_summary", {"external_ids": external_ids}
+        )
         usage_report = parse_json_content(usage_report)
         return usage_report[0] if usage_report else None
 
@@ -138,10 +144,11 @@ async def get_usage_report(userId: str | None):
 async def test_all_tools():
     start_time = time.time()
     user_query = "How should I do marketing in the twenty-first century?"
+    external_id = "test_user_id"
 
     # Time search_publications
     search_start = time.time()
-    matched_publications = await search_publications(user_query)
+    matched_publications = await search_publications(user_query, [external_id])
     search_elapsed = time.time() - search_start
     print(
         f"[search_publications] found {len(matched_publications) if matched_publications else 0} publications in {search_elapsed:.2f} seconds"
@@ -193,9 +200,12 @@ async def test_all_tools():
     total_elapsed = time.time() - start_time
     print(f"\nTotal test execution time: {total_elapsed:.2f} seconds")
 
-    # TODO: Implement get_usage_report
-    # usage_report = await get_usage_report(None)
-    # print(f"usage_report: {usage_report}")
+    # Time get_usage_report
+    usage_report_start = time.time()
+    usage_report = await get_usage_report_summary(external_ids=[external_id])
+    usage_report_elapsed = time.time() - usage_report_start
+    print(f"[get_usage_report] retrieved in {usage_report_elapsed:.2f} seconds")
+    print(f"usage_report: {usage_report}")
 
 
 async def test_requests_per_second(
@@ -533,7 +543,7 @@ async def test_tool(
     if tool == "search_publications":
         if query is None:
             raise ValueError("query is required for search_publications")
-        response = await search_publications(query)
+        response = await search_publications(query, None)
     elif tool == "list_publications":
         response = await list_publications(collection_id)
     elif tool == "get_publication":
@@ -546,8 +556,8 @@ async def test_tool(
         if collection_id is None:
             raise ValueError("collection_id is required for get_collection")
         response = await get_collection(collection_id)
-    elif tool == "get_usage_report":
-        response = await get_usage_report(None)
+    elif tool == "get_usage_report_summary":
+        response = await get_usage_report_summary(None)
     else:
         raise ValueError(f"Unknown tool: {tool}")
     return print(f"[test_tool] {tool}: {pyjson.dumps(response, indent=2)}")
@@ -562,7 +572,14 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--mode",
-        choices=["load", "rps", "test_all", "list", "resources"],
+        choices=[
+            "load",
+            "rps",
+            "test_all",
+            "list_tools",
+            "list_resources",
+            "get_usage_report_summary",
+        ],
         help="Which helper to run (default: load)",
     )
     parser.add_argument(
@@ -617,6 +634,8 @@ if __name__ == "__main__":
         asyncio.run(list_tools())
     elif args.mode == "list_resources":
         asyncio.run(list_resources())
+    elif args.mode == "get_usage_report_summary":
+        asyncio.run(get_usage_report_summary())
     elif args.tool:
         asyncio.run(
             test_tool(args.tool, args.collection_id, args.publication_id, args.query)
