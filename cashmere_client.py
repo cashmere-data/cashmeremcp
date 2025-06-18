@@ -3,6 +3,7 @@ import json as pyjson
 import random
 import sys
 import time
+from typing import Optional
 
 from mcp.types import TextContent
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -35,7 +36,7 @@ def parse_json_content(content):
 
 
 class Settings(BaseSettings):
-    CASHMERE_API_KEY: str
+    CASHMERE_API_KEY: Optional[str] = None
     CASHMERE_MCP_SERVER_URL: str
     model_config = SettingsConfigDict(env_file=".env.local", extra="ignore")
 
@@ -44,10 +45,13 @@ settings = Settings()
 
 
 def create_authenticated_client():
+    client_kwargs = {}
     auth_token = settings.CASHMERE_API_KEY
+    if auth_token:
+        client_kwargs["auth"] = BearerAuth(auth_token)
     return Client(
         settings.CASHMERE_MCP_SERVER_URL,
-        auth=BearerAuth(auth_token),
+        **client_kwargs,
     )
 
 
