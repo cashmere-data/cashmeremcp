@@ -1,17 +1,13 @@
 [project]
-name = "fastmcp"
+name = "cashmere-client"
 dynamic = ["version"]
 description = "The fast, Pythonic way to build MCP servers."
 authors = [{ name = "Jeremiah Lowin" }]
 dependencies = [
+    "fastmcp",
     "python-dotenv>=1.1.0",
-    "exceptiongroup>=1.2.2",
-    "httpx>=0.28.1",
-    "mcp>=1.9.2,<2.0.0",
-    "openapi-pydantic>=0.5.1",
-    "rich>=13.9.4",
-    "typer>=0.15.2",
-    "authlib>=1.5.2",
+    "pydantic>=2.0.0",
+    "pydantic-settings>=2.0.0"
 ]
 requires-python = ">=3.10"
 readme = "README.md"

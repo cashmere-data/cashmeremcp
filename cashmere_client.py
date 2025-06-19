@@ -1,11 +1,18 @@
+"""Cashmere MCP Client
+
+A Python client for interacting with the Cashmere MCP API.
+"""
+
 import asyncio
 import json as pyjson
 import random
 import sys
 import time
+from typing import Any, Dict, List, Optional, Type, TypeVar, Union, cast, get_origin, get_args, get_type_hints
 
-from mcp.types import TextContent
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from fastmcp import Client
+from fastmcp.client.auth import BearerAuth
+from pydantic_settings import BaseSettings, SettingsConfigDict  # type: ignore
 
 from cashmere_types import (
     Collection,
@@ -13,633 +20,515 @@ from cashmere_types import (
     Publication,
     PublicationsResponse,
     SearchPublicationsResponse,
+    SearchPublicationItem,
 )
-from fastmcp import Client
-from fastmcp.client.auth import BearerAuth
 
 
-def parse_json_content(content):
+class APIResponseError(ValueError):
+    """Raised when the API returns an unexpected response format."""
+    pass
+
+
+def parse_json_content(content: Any, model_type: type | None = None) -> Any:
+    """Convert TextContent, str, bytes, bytearray, or list to parsed JSON.
+    
+    Args:
+        content: The content to parse (can be TextContent, str, bytes, bytearray, or list)
+        model_type: Optional type hint to convert the parsed content to
+        
+    Returns:
+        Parsed JSON content, optionally converted to the specified type.
+        If the input is a list, only the first item is parsed.
+        
+    Raises:
+        APIResponseError: If the content cannot be parsed or doesn't match the expected format
+        TypeError: If the content type is not supported
     """
-    Convert TextContent, str, bytes, bytearray, or list of these to parsed JSON.
-    Raises TypeError for unsupported types.
-    """
+    def _get_original_text(data: Any) -> str:
+        """Helper to get the original text content if available."""
+        if hasattr(data, 'text'):
+            return data.text
+        if isinstance(data, (str, bytes, bytearray)):
+            return data.decode('utf-8') if isinstance(data, (bytes, bytearray)) else data
+        return str(data)
 
-    if isinstance(content, TextContent):
-        return pyjson.loads(content.text)
-    elif isinstance(content, str | bytes | bytearray):
-        return pyjson.loads(content)
-    elif isinstance(content, list):
-        return [parse_json_content(item) for item in content]
-    else:
-        raise TypeError(f"Unsupported content type: {type(content)}")
+    def _parse(data: Any) -> Any:
+        original_text = _get_original_text(data)
+        
+        # Handle lists by taking the first item if it's the only item
+        if isinstance(data, list):
+            if not data:
+                raise APIResponseError("Received empty list in API response")
+            if len(data) > 1:
+                print(f"Warning: Received {len(data)} items in response, only processing the first one")
+            data = data[0]
+        
+        # Handle TextContent-like objects
+        if hasattr(data, 'text') and hasattr(data, 'type'):
+            try:
+                data = pyjson.loads(data.text)
+            except (pyjson.JSONDecodeError, TypeError) as e:
+                raise APIResponseError(f"Failed to parse JSON from TextContent: {str(e)}\nOriginal content: {original_text}")
+        # Handle string/bytes input
+        elif isinstance(data, (str, bytes, bytearray)):
+            try:
+                data = pyjson.loads(data)
+            except (pyjson.JSONDecodeError, TypeError) as e:
+                raise APIResponseError(f"Failed to parse JSON: {str(e)}\nOriginal content: {original_text}")
+        
+        # If we have a model type to validate against
+        if model_type is not None:
+            # Handle list types like List[SearchPublicationItem]
+            if hasattr(model_type, '__origin__') and get_origin(model_type) is list:
+                if not isinstance(data, list):
+                    raise APIResponseError(f"Expected a list, got {type(data).__name__}\nOriginal content: {original_text}")
+                item_type = get_args(model_type)[0]
+                if hasattr(item_type, '__annotations__'):  # List[TypedDict]
+                    return [item_type(**item) if isinstance(item, dict) else item for item in data]
+                return data
+            # Handle TypedDict
+            elif hasattr(model_type, '__annotations__'):
+                if not isinstance(data, dict):
+                    raise APIResponseError(f"Expected a dictionary, got {type(data).__name__}\nOriginal content: {original_text}")
+                result = {}
+                for field, field_type in get_type_hints(model_type).items():
+                    if field in data:
+                        try:
+                            result[field] = _convert_value(data[field], field_type)
+                        except (ValueError, TypeError) as e:
+                            raise APIResponseError(f"Failed to convert field '{field}': {str(e)}\nOriginal content: {original_text}")
+                    elif field in getattr(model_type, '__required_keys__', set()):
+                        raise APIResponseError(f"Missing required field: {field}\nOriginal content: {original_text}")
+                return model_type(**result)
+        
+        return data
+    
+    def _convert_value(value: Any, target_type: type) -> Any:
+        """Convert a value to the target type if necessary."""
+        if value is None:
+            return None
+            
+        # Handle primitive types
+        if target_type in (str, int, float, bool):
+            try:
+                return target_type(value)
+            except (ValueError, TypeError) as e:
+                raise ValueError(f"Cannot convert {value!r} to {target_type.__name__}")
+        
+        # Handle generic types like List, Dict, etc.
+        if hasattr(target_type, '__origin__'):
+            origin = get_origin(target_type)
+            args = get_args(target_type)
+            
+            if origin is list and isinstance(value, list):
+                item_type = args[0] if args else type(value[0]) if value else str
+                return [_convert_value(item, item_type) for item in value]
+                
+            elif origin is dict and isinstance(value, dict):
+                key_type, value_type = args if len(args) == 2 else (str, type(next(iter(value.values()))) if value else str)
+                return {_convert_value(k, key_type): _convert_value(v, value_type) 
+                       for k, v in value.items()}
+                       
+            elif origin is Union:  # Handle Optional[Type] which is Union[Type, None]
+                non_none_types = [t for t in args if t is not type(None)]
+                if non_none_types:
+                    return _convert_value(value, non_none_types[0])
+        
+        # Handle nested TypedDict
+        elif hasattr(target_type, '__annotations__'):
+            return parse_json_content(value, target_type)
+            
+        return value
+    
+    try:
+        return _parse(content)
+    except APIResponseError:
+        raise
+    except Exception as e:
+        raise APIResponseError(f"Error parsing content: {str(e)}") from e
 
 
 class Settings(BaseSettings):
-    CASHMERE_API_KEY: str
-    CASHMERE_MCP_SERVER_URL: str
+    """Application settings."""
+    
+    CASHMERE_API_KEY: str = ""
+    CASHMERE_MCP_SERVER_URL: str = ""
+    
     model_config = SettingsConfigDict(env_file=".env.local", extra="ignore")
 
 
+# Global settings instance
 settings = Settings()
 
 
-def create_authenticated_client():
-    auth_token = settings.CASHMERE_API_KEY
-    return Client(
-        settings.CASHMERE_MCP_SERVER_URL,
-        auth=BearerAuth(auth_token),
-    )
-
-
-async def list_tools():
-    client = create_authenticated_client()
-    async with client:
-        tools = await client.list_tools()
-        print("Tools:")
-        print("\n".join(f"  - {t.name}" for t in tools))
-
-
-async def list_resources():
-    client = create_authenticated_client()
-    async with client:
-        resources = await client.list_resources()
-        print("Resources:")
-        print("\n".join(f"  - {r.uri}" for r in resources))
-
-
-async def search_publications(
-    query: str, external_ids: str | list[str] | None = None
-) -> SearchPublicationsResponse:
-    client = create_authenticated_client()
-    async with client:
-        publications = await client.call_tool(
-            "search_publications", {"query": query, "external_ids": external_ids}
-        )
-        publications = parse_json_content(publications)
-        print(
-            f"[search_publications] Publications: {len(publications[0]) if publications else 0}"
-        )
-        if not isinstance(publications, list):
-            raise ValueError("Unexpected response format from search_publications")
-        return publications[0] if publications else None
-
-
-async def list_publications(
-    collection_id: int | None = None,
-    limit: int | None = None,
-    offset: int | None = None,
-) -> PublicationsResponse:
-    client = create_authenticated_client()
-    async with client:
-        publications = await client.call_tool(
-            "list_publications",
-            {"limit": limit, "offset": offset, "collection_id": collection_id},
-        )
-        publications = parse_json_content(publications)
-        return publications[0] if publications else None
-
-
-async def get_publication(publication_id: str) -> Publication:
-    client = create_authenticated_client()
-    async with client:
-        publication = await client.call_tool(
-            "get_publication", {"publication_id": publication_id}
-        )
-        publication = parse_json_content(publication)
-        return publication[0] if publication else None
-
-
-async def list_collections(
-    limit: int | None = None, offset: int | None = None
-) -> CollectionsResponse:
-    client = create_authenticated_client()
-    async with client:
-        collections = await client.call_tool(
-            "list_collections", {"limit": limit, "offset": offset}
-        )
-        collections = parse_json_content(collections)
-        return collections[0] if collections else None
-
-
-async def get_collection(collection_id: int) -> Collection:
-    client = create_authenticated_client()
-    async with client:
-        collection = await client.call_tool(
-            "get_collection", {"collection_id": collection_id}
-        )
-        collection = parse_json_content(collection)
-        return collection[0] if collection else None
-
-
-async def get_usage_report_summary(external_ids: str | list[str] | None = None):
-    client = create_authenticated_client()
-    async with client:
-        usage_report = await client.call_tool(
-            "get_usage_report_summary", {"external_ids": external_ids}
-        )
-        usage_report = parse_json_content(usage_report)
-        return usage_report[0] if usage_report else None
-
-
-async def test_all_tools():
-    start_time = time.time()
-    user_query = "How should I do marketing in the twenty-first century?"
-    external_id = "test_user_id"
-
-    # Time search_publications
-    search_start = time.time()
-    matched_publications = await search_publications(user_query, [external_id])
-    search_elapsed = time.time() - search_start
-    print(
-        f"[search_publications] found {len(matched_publications) if matched_publications else 0} publications in {search_elapsed:.2f} seconds"
-    )
-
-    # Time list_collections
-    list_collections_start = time.time()
-    collections = await list_collections()
-    list_collections_elapsed = time.time() - list_collections_start
-    print(
-        f"[list_collections] found {collections['count']} collections in {list_collections_elapsed:.2f} seconds"
-    )
-
-    if not collections.get("items"):
-        print("No collections found, cannot proceed with remaining tests")
-        return
-    collection_id = [c["id"] for c in collections["items"] if c["pubs_count"] > 0][0]
-    if not collection_id:
-        print(
-            "No collections with publications found, cannot proceed with remaining tests"
-        )
-        return
-
-    collection_start = time.time()
-    collection = await get_collection(collection_id)
-    collection_elapsed = time.time() - collection_start
-    print(
-        f"[get_collection] {collection_id} {collection['name']} retrieved in {collection_elapsed:.2f} seconds"
-    )
-
-    # Time list_publications
-    list_pubs_start = time.time()
-    publications = await list_publications(collection_id=collection_id)
-    list_pubs_elapsed = time.time() - list_pubs_start
-    print(
-        f"[list_publications] found {publications['count'] if publications else 0} publications in {list_pubs_elapsed:.2f} seconds"
-    )
-
-    if not publications or not publications.get("items"):
-        print("No publications found, cannot proceed with get_publication test")
-        return
-
-    # Time get_publication
-    get_pub_start = time.time()
-    await get_publication(publications["items"][0]["uuid"])
-    get_pub_elapsed = time.time() - get_pub_start
-    print(f"[get_publication] retrieved in {get_pub_elapsed:.2f} seconds")
-
-    total_elapsed = time.time() - start_time
-    print(f"\nTotal test execution time: {total_elapsed:.2f} seconds")
-
-    # Time get_usage_report
-    usage_report_start = time.time()
-    usage_report = await get_usage_report_summary(external_ids=[external_id])
-    usage_report_elapsed = time.time() - usage_report_start
-    print(f"[get_usage_report] retrieved in {usage_report_elapsed:.2f} seconds")
-    print(f"usage_report: {usage_report}")
-
-
-async def test_requests_per_second(
-    duration_seconds: int = 10, max_retries: int = 3, max_concurrent: int = 50
-):
-    """Test the requests per second that the search_publications tool can handle.
-
-    Args:
-        duration_seconds: How long to run the test for (default: 10 seconds)
-        max_retries: Maximum number of retry attempts for failed requests (default: 3)
-        max_concurrent: Maximum number of concurrent requests (default: 50)
-
+def create_authenticated_client() -> Client:
+    """Create an authenticated MCP client.
+    
     Returns:
-        dict: Statistics about the test run
+        An authenticated Client instance
     """
-    stats = {
-        "total_requests": 0,
-        "successful_requests": 0,
-        "failed_requests": 0,
-        "error_counts": {},
-        "latencies": [],
-        "start_time": time.time(),
-        "active_requests": 0,
-        "max_concurrent": 0,
-    }
-
-    # Semaphore to limit concurrency
-    semaphore = asyncio.Semaphore(max_concurrent)
-
-    try:
-        with open("sample_search_queries.json") as f:
-            query_pool = pyjson.load(f)["search_queries"]
-    except (FileNotFoundError, pyjson.JSONDecodeError, KeyError) as e:
-        print(f"Warning: Could not load sample queries: {e}. Using fallback queries.")
-        query_pool = [f"query {i}" for i in range(100)]
-
-    async def make_request():
-        nonlocal stats
-        query = random.choice(query_pool)
-        retries = 0
-        last_error = None
-
-        try:
-            async with semaphore:
-                stats["active_requests"] += 1
-                stats["max_concurrent"] = max(
-                    stats["max_concurrent"], stats["active_requests"]
-                )
-
-                while retries <= max_retries:
-                    try:
-                        request_start = time.time()
-                        await search_publications(query)
-                        latency = time.time() - request_start
-                        stats["latencies"].append(latency)
-                        stats["successful_requests"] += 1
-                        return
-                    except Exception as e:
-                        last_error = e
-                        retries += 1
-                        if retries <= max_retries:
-                            # Exponential backoff: 100ms, 200ms, 400ms, etc.
-                            await asyncio.sleep(0.1 * (2 ** (retries - 1)))
-                        continue
-
-                # If we get here, all retries failed
-                stats["failed_requests"] += 1
-                error_name = type(last_error).__name__
-                stats["error_counts"][error_name] = (
-                    stats["error_counts"].get(error_name, 0) + 1
-                )
-                return last_error
-        finally:
-            stats["active_requests"] = max(0, stats["active_requests"] - 1)
-
-    # Run the test for the specified duration
-    print(
-        f"Starting test for {duration_seconds} seconds with max {max_concurrent} concurrent requests..."
+    return Client(
+        transport=settings.CASHMERE_MCP_SERVER_URL,
+        auth=BearerAuth(settings.CASHMERE_API_KEY),
     )
-    start_time = time.time()
-    end_time = start_time + duration_seconds
-
-    tasks = set()
-    try:
-        while time.time() < end_time:
-            # Clean up completed tasks
-            done_tasks = {t for t in tasks if t.done()}
-            tasks -= done_tasks
-
-            # Check if we can add more tasks
-            if len(tasks) < max_concurrent * 2:  # Keep some buffer
-                stats["total_requests"] += 1
-                task = asyncio.create_task(make_request())
-                tasks.add(task)
-                task.add_done_callback(tasks.discard)
-
-            # Small sleep to prevent busy waiting
-            await asyncio.sleep(0.001)
-
-        # Wait for remaining tasks to complete with a timeout and process results
-        if tasks:
-            done, _ = await asyncio.wait(tasks, timeout=10.0)
-            # Process any remaining errors from completed tasks
-            for task in done:
-                if task.done() and not task.cancelled():
-                    try:
-                        await task
-                    except Exception:
-                        # These errors were already counted in make_request
-                        pass
-
-    except asyncio.CancelledError:
-        # Clean up any remaining tasks
-        for task in tasks:
-            if not task.done():
-                task.cancel()
-        if tasks:
-            await asyncio.wait(tasks, timeout=5.0)
-        raise
-
-    # Print summary
-    elapsed = time.time() - start_time
-    rps = stats["successful_requests"] / elapsed if elapsed > 0 else 0
-
-    print(f"\nTest completed in {elapsed:.2f} seconds")
-    print(f"Total requests: {stats['total_requests']}")
-    print(f"Successful requests: {stats['successful_requests']}")
-    print(f"Failed requests: {stats['failed_requests']}")
-    print(f"Max concurrent requests: {stats['max_concurrent']}")
-    print(
-        f"Success rate: {(stats['successful_requests'] / stats['total_requests'] * 100):.2f}%"
-        if stats["total_requests"] > 0
-        else "No requests made"
-    )
-    print(f"Requests per second: {rps:.2f}")
-
-    if stats["latencies"]:
-        print("\nLatency (ms):")
-        print(f"  Min: {min(stats['latencies']) * 1000:.2f}")
-        print(
-            f"  Avg: {(sum(stats['latencies']) / len(stats['latencies'])) * 1000:.2f}"
-        )
-        print(f"  Max: {max(stats['latencies']) * 1000:.2f}")
-
-        # Calculate percentiles if we have enough data
-        if len(stats["latencies"]) >= 10:
-            sorted_latencies = sorted(stats["latencies"])
-            p50 = sorted_latencies[int(len(sorted_latencies) * 0.5)]
-            p95 = sorted_latencies[int(len(sorted_latencies) * 0.95)]
-            p99 = sorted_latencies[int(len(sorted_latencies) * 0.99)]
-            print(f"  p50: {p50 * 1000:.2f}ms")
-            print(f"  p95: {p95 * 1000:.2f}ms")
-            print(f"  p99: {p99 * 1000:.2f}ms")
-
-    if stats["error_counts"]:
-        print("\nErrors encountered:")
-        for error, count in sorted(
-            stats["error_counts"].items(), key=lambda x: x[1], reverse=True
-        ):
-            print(
-                f"  {error}: {count} ({(count / stats['total_requests'] * 100):.1f}%)"
-            )
-
-    return stats
 
 
-async def load_test(
-    num_requests: int = 2000, concurrency: int | None = None, max_retries: int = 3
-) -> None:
+# Async functions
+async def async_list_tools():
+    """List all available tools from the MCP server.
+    
+    Returns:
+        List of available tools
     """
-    Run a load test with the specified number of requests and concurrency.
+    client = create_authenticated_client()
+    async with client:
+        result = await client.list_tools()
+        return result
 
+
+async def async_list_resources():
+    """List all available resources from the MCP server.
+    
+    Returns:
+        List of available resources
+    """
+    client = create_authenticated_client()
+    async with client:
+        result = await client.list_resources()
+        return result
+
+
+async def async_search_publications(
+    query: str, 
+    external_ids: Optional[Union[str, List[str]]] = None
+) -> SearchPublicationsResponse:
+    """Search for publications using the call_tool method.
+    
     Args:
-        num_requests: Total number of requests to make (default: 2000)
-        concurrency: Maximum number of concurrent requests (default: min(100, num_requests))
-        max_retries: Maximum number of retry attempts for failed requests (default: 3)
+        query: The search query
+        external_ids: Optional external IDs to filter by
+        
+    Returns:
+        Search response containing items and count
+        
+    Raises:
+        APIResponseError: If the API response format is unexpected
     """
-    concurrency = min(concurrency or num_requests, 100)  # Cap concurrency at 100
-
-    stats = {
-        "total_requests": 0,
-        "successful_requests": 0,
-        "failed_requests": 0,
-        "error_counts": {},
-        "latencies": [],
-        "start_time": time.time(),
-        "active_requests": 0,
-        "max_concurrent": 0,
-    }
-
-    # Semaphore to limit concurrency
-    semaphore = asyncio.Semaphore(concurrency)
-
+    client = create_authenticated_client()
     try:
-        with open("sample_search_queries.json") as f:
-            query_pool = pyjson.load(f)["search_queries"]
-    except (FileNotFoundError, pyjson.JSONDecodeError, KeyError) as e:
-        print(f"Warning: Could not load sample queries: {e}. Using fallback queries.")
-        query_pool = [f"query {i}" for i in range(100)]
+        # Initialize params with query
+        params: Dict[str, Any] = {"query": query}
+        
+        # Add external_ids to params if provided
+        if external_ids:
+            if isinstance(external_ids, str):
+                params["external_ids"] = [external_ids]
+            else:
+                params["external_ids"] = external_ids
+            
+        async with client:
+            result = await client.call_tool("search_publications", params)
+            print(f"Result: {result}")
+            # Parse the result as a list of SearchPublicationItem
+            parsed = parse_json_content(result, SearchPublicationsResponse)
+            
+            return parsed
+    except Exception as e:
+        if isinstance(e, APIResponseError):
+            raise
+        raise RuntimeError(f"Failed to search publications: {str(e)}") from e
 
-    async def make_request():
-        nonlocal stats
-        query = random.choice(query_pool)
-        retries = 0
-        last_error = None
 
+async def async_list_publications(
+    collection_id: Optional[int] = None,
+    limit: Optional[int] = None,
+    offset: Optional[int] = None,
+) -> PublicationsResponse:
+    """List publications with optional filtering using the call_tool method.
+    
+    Args:
+        collection_id: Filter by collection ID
+        limit: Maximum number of results to return
+        offset: Offset for pagination
+        
+    Returns:
+        Publications response containing items and count
+        
+    Raises:
+        APIResponseError: If the API response format is unexpected
+    """
+    client = create_authenticated_client()
+    async with client:
+        params: Dict[str, Any] = {}
+        if collection_id is not None:
+            params["collection_id"] = collection_id
+        if limit is not None:
+            params["limit"] = limit
+        if offset is not None:
+            params["offset"] = offset
+            
+        result = await client.call_tool("list_publications", params)
+        # Parse the result and ensure it's in the correct PublicationsResponse format
+        parsed = parse_json_content(result, PublicationsResponse)
+        
+        return parsed
+
+
+async def async_get_publication(publication_id: str) -> Publication:
+    """Get a single publication by ID using the call_tool method.
+    
+    Args:
+        publication_id: The ID of the publication to retrieve
+        
+    Returns:
+        The requested publication as a Publication object
+        
+    Raises:
+        APIResponseError: If the API response format is unexpected
+    """
+    client = create_authenticated_client()
+    async with client:
+        result = await client.call_tool("get_publication", {"publication_id": publication_id})
+        parsed = parse_json_content(result, Publication)
+        return parsed
+
+
+async def async_list_collections(
+    limit: Optional[int] = None,
+    offset: Optional[int] = None,
+) -> CollectionsResponse:
+    """List all collections using the call_tool method.
+    
+    Args:
+        limit: Maximum number of results to return
+        offset: Offset for pagination
+        
+    Returns:
+        Collections response containing items and count
+        
+    Raises:
+        APIResponseError: If the API response format is unexpected
+    """
+    client = create_authenticated_client()
+    async with client:
+        params: Dict[str, Any] = {}
+        if limit is not None:
+            params["limit"] = limit
+        if offset is not None:
+            params["offset"] = offset
+        result = await client.call_tool("list_collections", params)
+        return parse_json_content(result, CollectionsResponse)
+
+
+async def async_get_collection(collection_id: int) -> Collection:
+    """Get a single collection by ID using the call_tool method.
+    
+    Args:
+        collection_id: The ID of the collection to retrieve
+        
+    Returns:
+        The requested collection as a Collection object
+        
+    Raises:
+        APIResponseError: If the API response format is unexpected
+        ValueError: If the collection is not found
+    """
+    client = create_authenticated_client()
+    async with client:
         try:
-            async with semaphore:
-                stats["active_requests"] += 1
-                stats["max_concurrent"] = max(
-                    stats["max_concurrent"], stats["active_requests"]
-                )
+            result = await client.call_tool("get_collection", {"collection_id": collection_id})
+            print(f"Debug - Raw API response: {result}")  # Debug log
+            return parse_json_content(result, Collection)
+        except Exception as e:
+            print(f"Debug - Error in async_get_collection: {str(e)}")
+            print(f"Debug - Collection ID: {collection_id}")
+            print(f"Debug - Client settings: {settings.CASHMERE_MCP_SERVER_URL}")
+            raise
 
-                while retries <= max_retries:
-                    try:
-                        request_start = time.time()
-                        await search_publications(query)
-                        latency = time.time() - request_start
-                        stats["latencies"].append(latency)
-                        stats["successful_requests"] += 1
-                        return
-                    except Exception as e:
-                        last_error = e
-                        retries += 1
-                        if retries <= max_retries:
-                            # Exponential backoff: 100ms, 200ms, 400ms, etc.
-                            await asyncio.sleep(0.1 * (2 ** (retries - 1)))
-                        continue
 
-                # If we get here, all retries failed
-                stats["failed_requests"] += 1
-                error_name = type(last_error).__name__
-                stats["error_counts"][error_name] = (
-                    stats["error_counts"].get(error_name, 0) + 1
-                )
-                return last_error
-        finally:
-            stats["active_requests"] = max(0, stats["active_requests"] - 1)
+# Synchronous wrappers for backward compatibility
+def list_tools():
+    """Synchronously list all available tools."""
+    return asyncio.run(async_list_tools())
 
-    # Create and manage tasks with controlled concurrency
-    tasks = set()
-    stats["start_time"] = time.time()
 
+def list_resources():
+    """Synchronously list all available resources."""
+    return asyncio.run(async_list_resources())
+
+
+def search_publications(
+    query: str, 
+    external_ids: Optional[Union[str, List[str]]] = None
+) -> SearchPublicationsResponse:
+    """Synchronously search for publications."""
+    return asyncio.run(async_search_publications(query, external_ids))
+
+
+def list_publications(
+    collection_id: Optional[int] = None,
+    limit: Optional[int] = None,
+    offset: Optional[int] = None,
+) -> PublicationsResponse:
+    """Synchronously list publications.
+    
+    Args:
+        collection_id: Filter by collection ID
+        limit: Maximum number of results to return
+        offset: Offset for pagination
+        
+    Returns:
+        Publications response containing items and count
+    """
+    return asyncio.run(async_list_publications(collection_id, limit, offset))
+
+
+def get_publication(publication_id: str) -> Publication:
+    """Synchronously get a single publication."""
+    return asyncio.run(async_get_publication(publication_id))
+
+
+def list_collections(
+    limit: Optional[int] = None,
+    offset: Optional[int] = None,
+) -> CollectionsResponse:
+    """Synchronously list all collections."""
+    return asyncio.run(async_list_collections(limit, offset))
+
+
+def get_collection(collection_id: int) -> Collection:
+    """Synchronously get a single collection."""
+    return asyncio.run(async_get_collection(collection_id))
+
+
+def get_usage_report_summary(
+    external_ids: Optional[Union[str, List[str]]] = None
+) -> Dict[str, Any]:
+    """Get usage report summary.
+    
+    Args:
+        external_ids: Optional external IDs to filter by
+        
+    Returns:
+        Usage report summary
+    """
+    client = create_authenticated_client()
     try:
-        # Start initial batch of tasks
-        for _ in range(min(concurrency * 2, num_requests)):
-            if stats["total_requests"] >= num_requests:
-                break
-            stats["total_requests"] += 1
-            task = asyncio.create_task(make_request())
-            tasks.add(task)
-            task.add_done_callback(tasks.discard)
-
-        # Process remaining tasks as others complete
-        while stats["total_requests"] < num_requests and tasks:
-            # Wait for at least one task to complete
-            done, pending = await asyncio.wait(
-                tasks, return_when=asyncio.FIRST_COMPLETED
-            )
-
-            # Start new tasks to replace completed ones
-            for _ in range(len(done)):
-                if stats["total_requests"] < num_requests:
-                    stats["total_requests"] += 1
-                    task = asyncio.create_task(make_request())
-                    tasks.add(task)
-                    task.add_done_callback(tasks.discard)
-
-        # Wait for all remaining tasks to complete and process results
-        if tasks:
-            done, _ = await asyncio.wait(tasks, timeout=30.0)
-            # Process any remaining errors from completed tasks
-            for task in done:
-                if task.done() and not task.cancelled():
-                    try:
-                        await task
-                    except Exception:
-                        # These errors were already counted in make_request
-                        pass
-
-    except asyncio.CancelledError:
-        # Clean up any remaining tasks
-        for task in tasks:
-            if not task.done():
-                task.cancel()
-        if tasks:
-            await asyncio.wait(tasks, timeout=5.0)
-        raise
-
-    total_time = time.time() - stats["start_time"]
-
-    # Print results
-    print(f"\n[load_test] Results (completed in {total_time:.2f} seconds):")
-    print(f"  Total requests: {stats['total_requests']}")
-    print(
-        f"  Successful: {stats['successful_requests']} ({(stats['successful_requests'] / stats['total_requests'] * 100):.1f}%)"
-    )
-    print(
-        f"  Failed: {stats['failed_requests']} ({(stats['failed_requests'] / stats['total_requests'] * 100):.1f}%)"
-    )
-    print(f"  Max concurrent requests: {stats['max_concurrent']}")
-
-    if stats["error_counts"]:
-        print("\n  Error breakdown:")
-        for error, count in sorted(
-            stats["error_counts"].items(), key=lambda x: x[1], reverse=True
-        ):
-            print(
-                f"    {error}: {count} ({(count / stats['total_requests'] * 100):.1f}%)"
-            )
-
-    if stats["latencies"]:
-        rps = len(stats["latencies"]) / total_time
-        sorted_latencies = sorted(stats["latencies"])
-        p50 = sorted_latencies[int(len(sorted_latencies) * 0.5)] * 1000
-        p95 = sorted_latencies[int(len(sorted_latencies) * 0.95)] * 1000
-        p99 = (
-            sorted_latencies[int(len(sorted_latencies) * 0.99)] * 1000
-            if len(sorted_latencies) >= 100
-            else 0.0
-        )
-
-        print("\n  Successful request metrics:")
-        print(f"    Requests per second: {rps:.2f}")
-        print(f"    Latency (p50): {p50:.2f}ms")
-        print(f"    Latency (p95): {p95:.2f}ms")
-        if p99 > 0:
-            print(f"    Latency (p99): {p99:.2f}ms")
+        # This is a synchronous wrapper, so we need to run the async function
+        async def _get_usage() -> Dict[str, Any]:
+            async with client:
+                params = {}
+                if external_ids:
+                    params["external_ids"] = external_ids if isinstance(external_ids, list) else [external_ids]
+                result = await client.call_tool("get_usage_report_summary", params or {})
+                return cast(Dict[str, Any], parse_json_content(result))
+                
+        return asyncio.run(_get_usage())
+    except Exception as e:
+        raise RuntimeError(f"Failed to get usage report: {str(e)}") from e
 
 
-async def test_tool(
-    tool: str, collection_id: int | None, publication_id: str | None, query: str
-):
-    response = None
-    if tool == "search_publications":
-        if query is None:
-            raise ValueError("query is required for search_publications")
-        response = await search_publications(query, None)
-    elif tool == "list_publications":
-        response = await list_publications(collection_id)
-    elif tool == "get_publication":
-        if publication_id is None:
-            raise ValueError("publication_id is required for get_publication")
-        response = await get_publication(publication_id)
-    elif tool == "list_collections":
-        response = await list_collections()
-    elif tool == "get_collection":
-        if collection_id is None:
-            raise ValueError("collection_id is required for get_collection")
-        response = await get_collection(collection_id)
-    elif tool == "get_usage_report_summary":
-        response = await get_usage_report_summary(None)
-    else:
-        raise ValueError(f"Unknown tool: {tool}")
-    return print(f"[test_tool] {tool}: {pyjson.dumps(response, indent=2)}")
-
-
-# Entrypoint for command-line usage
-if __name__ == "__main__":
+# Command-line interface
+def main() -> None:
+    """Main entry point for command-line usage."""
     import argparse
-
-    parser = argparse.ArgumentParser(
-        description="Cashmere MCP client utilities and load‑testing helper"
-    )
-    parser.add_argument(
-        "--mode",
-        choices=[
-            "load",
-            "rps",
-            "test_all",
-            "list_tools",
-            "list_resources",
-            "get_usage_report_summary",
-        ],
-        help="Which helper to run (default: load)",
-    )
-    parser.add_argument(
-        "--tool",
-        choices=[
-            "search_publications",
-            "list_publications",
-            "get_publication",
-            "list_collections",
-            "get_collection",
-        ],
-        help="Which tool to test (default: search_publications)",
-    )
-    parser.add_argument(
-        "--collection_id",
-        type=int,
-        default=None,
-        help="Collection ID to use for list_publications and get_publication tests",
-    )
-    parser.add_argument(
-        "--publication_id",
-        type=str,
-        default=None,
-        help="Publication ID to use for get_publication tests",
-    )
-    parser.add_argument(
-        "--query",
-        type=str,
-        help="Query to use for search_publications tests",
-    )
-    parser.add_argument(
-        "--requests",
-        type=int,
-        default=2000,
-        help="Number of requests to send when --mode load is selected",
-    )
-    parser.add_argument(
-        "--concurrency",
-        type=int,
-        default=None,
-        help="Max concurrent requests (defaults to --requests)",
-    )
+    
+    parser = argparse.ArgumentParser(description="Cashmere MCP Client")
+    subparsers = parser.add_subparsers(dest="command", required=True)
+    
+    # List tools
+    subparsers.add_parser("list-tools", help="List available tools")
+    
+    # List resources
+    subparsers.add_parser("list-resources", help="List available resources")
+    
+    # Search publications
+    search_parser = subparsers.add_parser("search", help="Search publications")
+    search_parser.add_argument("query", help="Search query")
+    search_parser.add_argument("--external-ids", nargs="+", help="External IDs to filter by")
+    
+    # List publications
+    list_pubs_parser = subparsers.add_parser("list-publications", help="List publications")
+    list_pubs_parser.add_argument("--collection-id", type=int, help="Filter by collection ID")
+    list_pubs_parser.add_argument("--limit", type=int, help="Maximum number of results")
+    list_pubs_parser.add_argument("--offset", type=int, help="Pagination offset")
+    
+    # Get publication
+    get_pub_parser = subparsers.add_parser("get-publication", help="Get publication by ID")
+    get_pub_parser.add_argument("publication_id", help="Publication ID")
+    
+    # List collections
+    list_colls_parser = subparsers.add_parser("list-collections", help="List collections")
+    list_colls_parser.add_argument("--limit", type=int, help="Maximum number of results")
+    list_colls_parser.add_argument("--offset", type=int, help="Pagination offset")
+    
+    # Get collection
+    get_coll_parser = subparsers.add_parser("get-collection", help="Get collection by ID")
+    get_coll_parser.add_argument("collection_id", type=int, help="Collection ID")
+    
+    # Get usage report
+    usage_parser = subparsers.add_parser("usage", help="Get usage report")
+    usage_parser.add_argument("--external-ids", nargs="+", help="External IDs to filter by")
+    
     args = parser.parse_args()
-
-    if args.mode == "load":
-        asyncio.run(load_test(num_requests=args.requests, concurrency=args.concurrency))
-    elif args.mode == "rps":
-        asyncio.run(test_requests_per_second())
-    elif args.mode == "test_all":
-        asyncio.run(test_all_tools())
-    elif args.mode == "list_tools":
-        asyncio.run(list_tools())
-    elif args.mode == "list_resources":
-        asyncio.run(list_resources())
-    elif args.mode == "get_usage_report_summary":
-        asyncio.run(get_usage_report_summary())
-    elif args.tool:
-        asyncio.run(
-            test_tool(args.tool, args.collection_id, args.publication_id, args.query)
-        )
-    else:
-        parser.print_help()
+    
+    try:
+        if args.command == "list-tools":
+            tools = list_tools()
+            print(f"{len(tools)} available tools:")
+            for tool in tools:
+                print(f"- {tool.name}")
+                
+        elif args.command == "list-resources":
+            resources = list_resources()
+            print(f"{len(resources)} available resources:")
+            for resource in resources:
+                print(f"- {resource.name}")
+                
+        elif args.command == "search":
+            results: SearchPublicationsResponse = search_publications(args.query, args.external_ids)
+            print(f"Found {len(results)} results:")
+            for i, result in enumerate(results, 1):
+                print(f"{i}. {result.get('omnipub_title', 'Untitled')} - {result.get('content', '')[:50]}...")
+                
+        elif args.command == "list-publications":
+            response: PublicationsResponse = list_publications(
+                collection_id=args.collection_id,
+                limit=args.limit,
+                offset=args.offset
+            )
+            print(f"Found {response.get('count', 0)} publications:")
+            for pub_item in response.get('items', []):
+                pub_data = pub_item.get('data', {})
+                print(f"- {pub_data.get('title', 'Untitled')} ({pub_item.get('uuid', 'No ID')})")
+                
+        elif args.command == "get-publication":
+            pub = get_publication(args.publication_id)
+            print(f"Title: {pub.get('data', {}).get('title', 'Untitled')}")
+            print(f"ID: {pub.get('uuid', 'No ID')}")
+            
+        elif args.command == "list-collections":
+            collections = list_collections(limit=args.limit, offset=args.offset)
+            print(f"Found {collections['count']} collections:")
+            for coll in collections['items']:
+                print(f"- {coll.get('name', 'Unnamed collection')} (ID: {coll.get('id', '?')})")
+                
+        elif args.command == "get-collection":
+            coll = get_collection(args.collection_id)
+            print(f"Name: {coll.get('name', 'Unnamed collection')}")
+            print(f"ID: {coll.get('id', '?')}")
+            print(f"Description: {coll.get('description', 'No description')}")
+            
+        elif args.command == "usage":
+            usage = get_usage_report_summary(external_ids=args.external_ids)
+            print("Usage report:")
+            for k, v in usage.items():
+                print(f"{k}: {v}")
+                
+    except Exception as e:
+        print(f"Error: {str(e)}", file=sys.stderr)
         sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()

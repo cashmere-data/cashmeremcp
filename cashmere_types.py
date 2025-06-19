@@ -3,16 +3,15 @@ from typing import TypedDict
 
 # --- SearchPublicationsResponse ---
 class SearchPublicationItem(TypedDict):
-    block_uuid: str
-    text_chunk: str
-    distance: float
-    section_label: str
-    book_uuid: str
-    book_title: str
-    block_type: str
-    buy_book_url: str
     embedding_id: int
-    block_uuids: list[str]
+    content: str
+    view_source_url: str
+    distance: float
+    omnipub_uuid: str
+    omnipub_title: str
+    section_label: str
+    omnipub_publisher: str
+    omnipub_cover_image: str
 
 
 SearchPublicationsResponse = list[SearchPublicationItem]
@@ -56,17 +55,17 @@ class CollectionsResponse(TypedDict):
 
 
 # --- Publication ---
-class NavItem(TypedDict):
+class NavItem(TypedDict, total=False):
     level: int
     label: str
-    href: str | None
-    full_href: str | None
-    anchor: str | None
+    href: str
+    full_href: str
+    anchor: str
     order: int
-    epub_item_id: str | None
-    section_block_uuid: str | None
-    cfi: str | None
-    partition_type: str | None
+    epub_item_id: str
+    section_block_uuid: str
+    cfi: str
+    partition_type: str
 
 
 class MetadataProperty(TypedDict, total=False):
@@ -79,7 +78,7 @@ class PublicationMetadata(TypedDict, total=False):
     property2: MetadataProperty
 
 
-class PublicationDataFull(TypedDict):
+class PublicationDataFull(TypedDict, total=False):
     title: str
     subtitle: str | None
     cover_image: str | None
@@ -93,7 +92,7 @@ class PublicationDataFull(TypedDict):
     metadata: PublicationMetadata | None
 
 
-class Publication(TypedDict):
+class Publication(TypedDict, total=False):
     uuid: str
     data: PublicationDataFull
     license_rights: list[str]
