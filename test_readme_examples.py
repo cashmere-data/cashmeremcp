@@ -199,7 +199,7 @@ async def test_async_api() -> None:
     print("\n3. Testing async_search_publications...")
     try:
         search_response = await async_search_publications("test")
-        items = search_response.get('items', [])
+        items = search_response or []
         print(f"✓ Search returned {len(items)} results")
         if items and isinstance(items[0], dict):
             print(f"   - First result: {items[0].get('omnipub_title', 'Untitled')}")
