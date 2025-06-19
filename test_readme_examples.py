@@ -19,6 +19,7 @@ from cashmere_client import (
     async_search_publications,
     async_list_collections,
     async_get_collection,
+    async_get_usage_report_summary,
 )
 
 
@@ -45,11 +46,11 @@ def test_sync_api() -> None:
     
     # Test list_publications
     print("\n1. Testing list_publications...")
+    items_list: List[PublicationItem] = []  # Ensure items_list is always initialized
     try:
         publications = list_publications(limit=2)
         
         # Initialize items_list based on the type of publications
-        items_list: List[PublicationItem] = []
         
         # Handle both list and PublicationsResponse types
         if isinstance(publications, dict) and 'items' in publications:
@@ -245,18 +246,18 @@ async def test_async_api() -> None:
         except Exception as e:
             print(f"✗ Error preparing to test async_get_collection: {e}")
     
-    # Test get_usage_report_summary (synchronous)
-    print("\n6. Testing get_usage_report_summary (synchronous)...")
+    # Test get_usage_report_summary (asynchronous)
+    print("\n6. Testing async_get_usage_report_summary (async)...")
     try:
-        usage = get_usage_report_summary()
+        usage = await async_get_usage_report_summary()
         if usage:
-            print("✓ Successfully retrieved usage report summary")
+            print("✓ Successfully retrieved usage report summary (async)")
             if 'total_requests' in usage:
                 print(f"   - Total requests: {usage.get('total_requests', 0)}")
             if 'by_endpoint' in usage:
                 print(f"   - Endpoints tracked: {len(usage.get('by_endpoint', {}))}")
     except Exception as e:
-        print(f"✗ Error in get_usage_report_summary: {e}")
+        print(f"✗ Error in async_get_usage_report_summary: {e}")
 
 
 def main() -> None:

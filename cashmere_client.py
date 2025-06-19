@@ -346,6 +346,26 @@ async def async_get_collection(collection_id: int) -> Collection:
             print(f"Debug - Client settings: {settings.CASHMERE_MCP_SERVER_URL}")
             raise
 
+async def async_get_usage_report_summary(
+    external_ids: Optional[Union[str, List[str]]] = None
+) -> Dict[str, Any]:
+    """
+    Asynchronously get usage report summary.
+
+    Args:
+        external_ids: Optional external IDs to filter by
+
+    Returns:
+        Usage report summary
+    """
+    client = create_authenticated_client()
+    async with client:
+        params = {}
+        if external_ids:
+            params["external_ids"] = external_ids if isinstance(external_ids, list) else [external_ids]
+        result = await client.call_tool("get_usage_report_summary", params or {})
+        return cast(Dict[str, Any], parse_json_content(result))
+
 
 # Synchronous wrappers for backward compatibility
 def list_tools() -> list[Tool]:
@@ -401,33 +421,19 @@ def get_collection(collection_id: int) -> Collection:
     """Synchronously get a single collection."""
     return asyncio.run(async_get_collection(collection_id))
 
-
 def get_usage_report_summary(
     external_ids: Optional[Union[str, List[str]]] = None
 ) -> Dict[str, Any]:
-    """Get usage report summary.
-    
+    """
+    Synchronously get usage report summary. If called from a running event loop, raises RuntimeError.
+
     Args:
         external_ids: Optional external IDs to filter by
-        
+
     Returns:
         Usage report summary
     """
-    client = create_authenticated_client()
-    try:
-        # This is a synchronous wrapper, so we need to run the async function
-        async def _get_usage() -> Dict[str, Any]:
-            async with client:
-                params = {}
-                if external_ids:
-                    params["external_ids"] = external_ids if isinstance(external_ids, list) else [external_ids]
-                result = await client.call_tool("get_usage_report_summary", params or {})
-                return cast(Dict[str, Any], parse_json_content(result))
-                
-        return asyncio.run(_get_usage())
-    except Exception as e:
-        raise RuntimeError(f"Failed to get usage report: {str(e)}") from e
-
+    return asyncio.run(async_get_usage_report_summary(external_ids=external_ids))
 
 # Command-line interface
 def main() -> None:
