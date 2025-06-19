@@ -12,6 +12,7 @@ from typing import Any, Dict, List, Optional, Type, TypeVar, Union, cast, get_or
 
 from fastmcp import Client
 from fastmcp.client.auth import BearerAuth
+from fastmcp.tools import Tool
 from pydantic_settings import BaseSettings, SettingsConfigDict  # type: ignore
 
 from cashmere_types import (
@@ -174,11 +175,11 @@ def create_authenticated_client() -> Client:
 
 
 # Async functions
-async def async_list_tools():
+async def async_list_tools() -> List[Tool]:
     """List all available tools from the MCP server.
     
     Returns:
-        List of available tools
+        List[Tool]: List of available tools
     """
     client = create_authenticated_client()
     async with client:
@@ -347,7 +348,7 @@ async def async_get_collection(collection_id: int) -> Collection:
 
 
 # Synchronous wrappers for backward compatibility
-def list_tools():
+def list_tools() -> list[Tool]:
     """Synchronously list all available tools."""
     return asyncio.run(async_list_tools())
 
