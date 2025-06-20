@@ -175,17 +175,17 @@ def create_authenticated_client() -> Client:
 
 
 # Async functions
-async def async_list_tools() -> list[FastMcpTool]:
+async def async_list_tools() -> list[dict]:
     """List all available tools from the MCP server.
     
     Returns:
-        List[FastMcpTool]: List of available tools
+        List[dict]: List of available tools as dictionaries
     """
     client = create_authenticated_client()
     async with client:
         result = await client.list_tools()
-        # Explicitly cast the result to the expected type
-        return [FastMcpTool(**tool.model_dump()) for tool in result]
+        # Return tools as dictionaries to avoid validation issues
+        return [tool.model_dump() for tool in result]
 
 
 async def async_list_resources():
@@ -370,8 +370,12 @@ async def async_get_usage_report_summary(
 
 
 # Synchronous wrappers for backward compatibility
-def list_tools() -> list[FastMcpTool]:
-    """Synchronously list all available tools."""
+def list_tools() -> list[dict]:
+    """Synchronously list all available tools.
+    
+    Returns:
+        List[dict]: List of available tools as dictionaries
+    """
     return asyncio.run(async_list_tools())
 
 
@@ -486,13 +490,15 @@ def main() -> None:
             tools = list_tools()
             print(f"{len(tools)} available tools:")
             for tool in tools:
-                print(f"- {tool.name}")
+                print(f"- {tool['name']}")
                 
         elif args.command == "list-resources":
             resources = list_resources()
             print(f"{len(resources)} available resources:")
             for resource in resources:
-                print(f"- {resource.name}")
+                # Use attribute access for Resource objects
+                name = getattr(resource, 'name', 'Unnamed')
+                print(f"- {name}")
                 
         elif args.command == "search":
             results: SearchPublicationsResponse = search_publications(args.query, args.external_ids)

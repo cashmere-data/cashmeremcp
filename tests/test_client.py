@@ -157,8 +157,8 @@ def test_list_tools() -> None:
     assert isinstance(tools, list), "Should return a list of tools"
     if tools:  # If tools are available, check their structure
         tool = tools[0]
-        assert hasattr(tool, 'name'), "Tool should have 'name'"
-        assert hasattr(tool, 'description'), "Tool should have 'description'"
+        assert 'name' in tool, "Tool should have 'name' key"
+        assert 'description' in tool, "Tool should have 'description' key"
 
 
 def test_list_resources() -> None:
@@ -230,8 +230,8 @@ async def test_async_list_tools() -> None:
     assert isinstance(tools, list), "Should return a list of tools"
     if tools:  # If tools are available, check their structure
         tool = tools[0]
-        assert hasattr(tool, 'name'), "Tool should have 'name'"
-        assert hasattr(tool, 'description'), "Tool should have 'description'"
+        assert 'name' in tool, "Tool should have 'name' key"
+        assert 'description' in tool, "Tool should have 'description' key"
 
 
 @pytest.mark.asyncio
