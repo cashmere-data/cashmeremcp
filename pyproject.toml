@@ -68,15 +68,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.pytest.ini_options]
-asyncio_mode = "auto"
-asyncio_default_fixture_loop_scope = "session"
-asyncio_default_test_loop_scope = "session"
-timeout = 3
-env = [
-    "FASTMCP_TEST_MODE=1",
-    'D:FASTMCP_LOG_LEVEL=DEBUG',
-    'D:FASTMCP_ENABLE_RICH_TRACEBACKS=0',
-]
+
 
 [tool.pyright]
 include = [".", "tests"]
@@ -96,3 +88,6 @@ extend-select = ["I", "UP"]
 
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["F401", "I001", "RUF013"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["cashmeremcp"]

@@ -3,11 +3,12 @@ import asyncio
 import os
 import sys
 from typing import Any, Dict, List, Optional, Union
+import pytest
 
 # Add parent directory to path to allow importing from cashmere_client
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '.')))
 
-from cashmere_client import (
+from cashmeremcp.cashmere_client import (
     list_publications,
     get_publication,
     search_publications,
@@ -165,6 +166,7 @@ def test_sync_api() -> None:
         print(f"✗ Error in get_usage_report_summary: {e}")
 
 
+@pytest.mark.asyncio
 async def test_async_api() -> None:
     """Test asynchronous API examples from README."""
     print("\nTesting asynchronous API examples...")

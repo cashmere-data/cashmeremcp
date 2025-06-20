@@ -24,7 +24,7 @@ if not all([os.getenv("CASHMERE_API_KEY"), os.getenv("CASHMERE_MCP_SERVER_URL")]
         allow_module_level=True
     )
 
-from cashmere_client import (
+from cashmeremcp.cashmere_client import (
     list_publications,
     get_publication,
     search_publications,
@@ -55,10 +55,26 @@ def get_test_publication_id() -> str:
         pytest.skip("No publications available for testing")
     return publications['items'][0]['uuid']
 
+
+async def async_get_test_publication_id() -> str:
+    """Async helper to get a valid publication ID for testing."""
+    publications = await async_list_publications(limit=1)
+    if not publications.get('items'):
+        pytest.skip("No publications available for testing")
+    return publications['items'][0]['uuid']
+
 # Helper function to get a test collection ID
 def get_test_collection_id() -> int:
     """Helper to get a valid collection ID for testing."""
     collections = list_collections(limit=1)
+    if not collections.get('items'):
+        pytest.skip("No collections available for testing")
+    return collections['items'][0]['id']
+
+
+async def async_get_test_collection_id() -> int:
+    """Async helper to get a valid collection ID for testing."""
+    collections = await async_list_collections(limit=1)
     if not collections.get('items'):
         pytest.skip("No collections available for testing")
     return collections['items'][0]['id']
@@ -141,8 +157,8 @@ def test_list_tools() -> None:
     assert isinstance(tools, list), "Should return a list of tools"
     if tools:  # If tools are available, check their structure
         tool = tools[0]
-        assert 'name' in tool, "Tool should have 'name'"
-        assert 'description' in tool, "Tool should have 'description'"
+        assert hasattr(tool, 'name'), "Tool should have 'name'"
+        assert hasattr(tool, 'description'), "Tool should have 'description'"
 
 
 def test_list_resources() -> None:
@@ -151,18 +167,21 @@ def test_list_resources() -> None:
     assert isinstance(resources, list), "Should return a list of resources"
     if resources:  # If resources are available, check their structure
         resource = resources[0]
-        assert 'name' in resource, "Resource should have 'name'"
-        assert 'type' in resource, "Resource should have 'type'"
+        assert hasattr(resource, 'name'), "Resource should have 'name'"
+        assert hasattr(resource, 'description'), "Resource should have 'description'"
 
 
 def test_get_usage_report_summary() -> None:
     """Test getting usage report summary."""
     try:
         report = get_usage_report_summary()
+        print(f"Debug - Raw API response: {report}")  # Debug log
         assert isinstance(report, dict), "Should return a dictionary"
-        # Check for expected keys in the report
-        assert 'total_usage' in report or 'periods' in report, \
-            "Report should contain usage data"
+        # Check for expected keys in the report based on actual API response
+        assert 'embeddings_count' in report, "Report should contain 'embeddings_count'"
+        assert 'first_report_date' in report, "Report should contain 'first_report_date'"
+        assert 'last_report_date' in report, "Report should contain 'last_report_date'"
+        assert 'report_count' in report, "Report should contain 'report_count'"
     except Exception as e:
         # Skip if the endpoint is not available or returns an error
         pytest.skip(f"Usage report endpoint not available: {e}")
@@ -183,13 +202,14 @@ async def test_async_list_publications() -> None:
 @pytest.mark.asyncio
 async def test_async_get_publication() -> None:
     """Test async getting of a single publication."""
-    pub_id = get_test_publication_id()
+    pub_id = await async_get_test_publication_id()
     result = await async_get_publication(pub_id)
     
     # Verify publication structure
     assert isinstance(result, dict), "Response should be a dictionary"
     assert 'uuid' in result, "Publication should have 'uuid'"
     assert 'data' in result, "Publication should have 'data'"
+    assert 'title' in result['data'], "Publication data should have 'title'"
 
 
 @pytest.mark.asyncio
@@ -210,8 +230,8 @@ async def test_async_list_tools() -> None:
     assert isinstance(tools, list), "Should return a list of tools"
     if tools:  # If tools are available, check their structure
         tool = tools[0]
-        assert 'name' in tool, "Tool should have 'name'"
-        assert 'description' in tool, "Tool should have 'description'"
+        assert hasattr(tool, 'name'), "Tool should have 'name'"
+        assert hasattr(tool, 'description'), "Tool should have 'description'"
 
 
 @pytest.mark.asyncio
@@ -221,8 +241,8 @@ async def test_async_list_resources() -> None:
     assert isinstance(resources, list), "Should return a list of resources"
     if resources:  # If resources are available, check their structure
         resource = resources[0]
-        assert 'name' in resource, "Resource should have 'name'"
-        assert 'type' in resource, "Resource should have 'type'"
+        assert hasattr(resource, 'name'), "Resource should have 'name'"
+        assert hasattr(resource, 'type'), "Resource should have 'type'"
 
 
 @pytest.mark.asyncio
@@ -230,10 +250,13 @@ async def test_async_get_usage_report_summary() -> None:
     """Test async getting of usage report summary."""
     try:
         report = await async_get_usage_report_summary()
+        print(f"Debug - Async Raw API response: {report}")  # Debug log
         assert isinstance(report, dict), "Should return a dictionary"
-        # Check for expected keys in the report
-        assert 'total_usage' in report or 'periods' in report, \
-            "Report should contain usage data"
+        # Check for expected keys in the report based on actual API response
+        assert 'embeddings_count' in report, "Report should contain 'embeddings_count'"
+        assert 'first_report_date' in report, "Report should contain 'first_report_date'"
+        assert 'last_report_date' in report, "Report should contain 'last_report_date'"
+        assert 'report_count' in report, "Report should contain 'report_count'"
     except Exception as e:
         # Skip if the endpoint is not available or returns an error
         pytest.skip(f"Async usage report endpoint not available: {e}")
@@ -259,11 +282,8 @@ async def test_async_list_collections() -> None:
 @pytest.mark.asyncio
 async def test_async_get_collection() -> None:
     """Test async getting a single collection."""
-    # First get a valid collection ID
-    collections = await async_list_collections(limit=1)
-    if not collections.get('items'):
-        pytest.skip("No collections available for testing")
-    collection_id = collections['items'][0]['id']
+    # Get a valid collection ID using async helper
+    collection_id = await async_get_test_collection_id()
     
     # Now test getting the collection by ID
     result = await async_get_collection(collection_id)

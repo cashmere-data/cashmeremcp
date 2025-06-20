@@ -364,6 +364,7 @@ async def async_get_usage_report_summary(
         if external_ids:
             params["external_ids"] = external_ids if isinstance(external_ids, list) else [external_ids]
         result = await client.call_tool("get_usage_report_summary", params or {})
+        print(f"Debug - Raw API response: {result}")  # Debug log
         return cast(Dict[str, Any], parse_json_content(result))
 
 
