@@ -1,0 +1,93 @@
+[project]
+name = "cashmeremcp"
+version = "0.1.0"
+description = "A Python client for the Cashmere Model Context Protocol (MCP)"
+authors = [{ name = "Wyatt Grantham" }, { name = "Conrad Frame" }]
+dependencies = [
+    "fastmcp",
+    "python-dotenv>=1.1.0",
+    "pydantic-settings>=2.0.0"
+]
+requires-python = ">=3.10"
+readme = "README.md"
+license = "Apache-2.0"
+
+keywords = [
+    "mcp",
+    "mcp server",
+    "mcp client",
+    "model context protocol",
+    "fastmcp",
+    "llm",
+    "agent",
+    "cashmere",
+]
+classifiers = [
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Typing :: Typed",
+]
+
+[project.optional-dependencies]
+dev = [
+    "copychat>=0.5.2",
+    "dirty-equals>=0.9.0",
+    "fastapi>=0.115.12",
+    "ipython>=8.12.3",
+    "pdbpp>=0.10.3",
+    "pre-commit",
+    "pyinstrument>=5.0.2",
+    "pyright>=1.1.389",
+    "pytest>=8.3.3",
+    "pytest-asyncio>=0.23.5",
+    "pytest-cov>=6.1.1",
+    "pytest-env>=1.1.5",
+    "pytest-flakefinder",
+    "pytest-httpx>=0.35.0",
+    "pytest-report>=0.2.1",
+    "pytest-timeout>=2.4.0",
+    "pytest-xdist>=3.6.1",
+    "ruff",
+]
+websockets = ["websockets>=15.0.1"]
+
+[project.scripts]
+fastmcp = "fastmcp.cli:app"
+
+[project.urls]
+Homepage = "https://cashmere.io"
+Repository = "https://github.com/cashmere-data/cashmeremcp"
+Documentation = "https://cashmere.io/api/v2/docs"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.pytest.ini_options]
+
+
+[tool.pyright]
+include = [".", "tests"]
+exclude = ["**/node_modules", "**/__pycache__", ".venv", ".git", "dist"]
+pythonVersion = "3.10"
+pythonPlatform = "Darwin"
+typeCheckingMode = "basic"
+reportMissingImports = true
+reportMissingTypeStubs = false
+useLibraryCodeForTypes = true
+venvPath = "."
+venv = ".venv"
+strict = ["src/fastmcp/server/server.py"]
+
+[tool.ruff.lint]
+extend-select = ["I", "UP"]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401", "I001", "RUF013"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["cashmeremcp"]

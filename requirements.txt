@@ -1,0 +1,5 @@
+fastmcp
+python-dotenv>=1.1.0
+pydantic>=2.0.0
+pydantic-settings>=2.0.0
+websockets>=15.0.1  # Optional dependency for websockets support
