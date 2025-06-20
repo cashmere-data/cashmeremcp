@@ -229,7 +229,7 @@ async def async_search_publications(
             
         async with client:
             result = await client.call_tool("search_publications", params)
-            print(f"Result: {result}")
+            # print(f"Result: {result}")
             # Parse the result as a list of SearchPublicationItem
             parsed = parse_json_content(result, SearchPublicationsResponse)
             

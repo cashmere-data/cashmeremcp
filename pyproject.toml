@@ -1,12 +1,11 @@
 [project]
-name = "cashmere-client"
-dynamic = ["version"]
-description = "The fast, Pythonic way to build MCP servers."
-authors = [{ name = "Jeremiah Lowin" }]
+name = "cashmeremcp"
+version = "0.1.0"
+description = "A Python client for the Cashmere Model Context Protocol (MCP)"
+authors = [{ name = "Wyatt Grantham" }, { name = "Conrad Frame" }]
 dependencies = [
     "fastmcp",
     "python-dotenv>=1.1.0",
-    "pydantic>=2.0.0",
     "pydantic-settings>=2.0.0"
 ]
 requires-python = ">=3.10"
@@ -21,6 +20,7 @@ keywords = [
     "fastmcp",
     "llm",
     "agent",
+    "cashmere",
 ]
 classifiers = [
     "Intended Audience :: Developers",
@@ -32,7 +32,7 @@ classifiers = [
     "Typing :: Typed",
 ]
 
-[dependency-groups]
+[project.optional-dependencies]
 dev = [
     "copychat>=0.5.2",
     "dirty-equals>=0.9.0",
@@ -53,38 +53,24 @@ dev = [
     "pytest-xdist>=3.6.1",
     "ruff",
 ]
+websockets = ["websockets>=15.0.1"]
 
 [project.scripts]
 fastmcp = "fastmcp.cli:app"
 
 [project.urls]
-Homepage = "https://gofastmcp.com"
-Repository = "https://github.com/jlowin/fastmcp"
-Documentation = "https://gofastmcp.com"
-
-[project.optional-dependencies]
-websockets = ["websockets>=15.0.1"]
-
+Homepage = "https://cashmere.io"
+Repository = "https://github.com/cashmere-data/cashmeremcp"
+Documentation = "https://cashmere.io/api/v2/docs"
 
 [build-system]
-requires = ["hatchling", "uv-dynamic-versioning>=0.7.0"]
+requires = ["hatchling"]
 build-backend = "hatchling.build"
-
-[tool.hatch.version]
-source = "uv-dynamic-versioning"
-
-[tool.uv-dynamic-versioning]
-vcs = "git"
-style = "pep440"
-bump = true
-fallback-version = "0.0.0"
-
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "session"
 asyncio_default_test_loop_scope = "session"
-# filterwarnings = ["error::DeprecationWarning"]
 timeout = 3
 env = [
     "FASTMCP_TEST_MODE=1",
@@ -93,7 +79,7 @@ env = [
 ]
 
 [tool.pyright]
-include = ["src", "tests"]
+include = [".", "tests"]
 exclude = ["**/node_modules", "**/__pycache__", ".venv", ".git", "dist"]
 pythonVersion = "3.10"
 pythonPlatform = "Darwin"

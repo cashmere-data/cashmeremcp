@@ -12,16 +12,47 @@ A Python client for interacting with the Cashmere MCP API, providing both synchr
 
 ## Installation
 
-1. Install the package using pip:
+### Using pip (recommended)
+
+1. Create and activate a virtual environment:
    ```bash
-   pip install cashmere-client
+   python -m venv venv
+   source venv/bin/activate  # On Windows use `venv\Scripts\activate`
    ```
 
-2. Create a `.env.local` file in your project directory with your API credentials:
+2. Install the package and its dependencies:
+   ```bash
+   pip install -e .
    ```
-   CASHMERE_API_KEY=your_api_key_here
-   CASHMERE_MCP_SERVER_URL=your_server_url_here
+
+   For development with all optional dependencies:
+   ```bash
+   pip install -e ".[dev]"
    ```
+
+### For Development
+
+1. Clone the repository and set up the development environment:
+   ```bash
+   git clone https://github.com/yourusername/cashmeremcp.git
+   cd cashmeremcp
+   python -m venv venv
+   source venv/bin/activate  # On Windows use `venv\Scripts\activate`
+   pip install -r requirements-dev.txt
+   ```
+
+2. Install pre-commit hooks (optional but recommended):
+   ```bash
+   pre-commit install
+   ```
+
+## Configuration
+
+Create a `.env.local` file in your project directory with your API credentials:
+```
+CASHMERE_API_KEY=your_api_key_here
+CASHMERE_MCP_SERVER_URL=your_server_url_here
+```
 
 ## Usage
 
