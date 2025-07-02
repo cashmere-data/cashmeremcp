@@ -4,13 +4,13 @@ A Python client for interacting with the Cashmere MCP API.
 """
 
 import asyncio
-import json as pyjson
-import sys
-from typing import Any, Dict, List, Optional, Union, cast, get_origin, get_args, get_type_hints
+import json
+from typing import Any, Dict, List, Optional, Union
+import time
 
 from fastmcp import Client
 from fastmcp.client.auth import BearerAuth
-from pydantic_settings import BaseSettings, SettingsConfigDict  # type: ignore
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from cashmere_types import (
     Collection,
@@ -18,131 +18,8 @@ from cashmere_types import (
     Publication,
     PublicationsResponse,
     SearchPublicationsResponse,
+    APIResponseError,
 )
-
-
-class APIResponseError(ValueError):
-    """Raised when the API returns an unexpected response format."""
-    pass
-
-
-def parse_json_content(content: Any, model_type: type | None = None) -> Any:
-    """Convert TextContent, str, bytes, bytearray, or list to parsed JSON.
-
-    Args:
-        content: The content to parse (can be TextContent, str, bytes, bytearray, or list)
-        model_type: Optional type hint to convert the parsed content to
-
-    Returns:
-        Parsed JSON content, optionally converted to the specified type.
-        If the input is a list, only the first item is parsed.
-
-    Raises:
-        APIResponseError: If the content cannot be parsed or doesn't match the expected format
-        TypeError: If the content type is not supported
-    """
-    def _get_original_text(data: Any) -> str:
-        """Helper to get the original text content if available."""
-        if hasattr(data, 'text'):
-            return data.text
-        if isinstance(data, (str, bytes, bytearray)):
-            return data.decode('utf-8') if isinstance(data, (bytes, bytearray)) else data
-        return str(data)
-
-    def _parse(data: Any) -> Any:
-        original_text = _get_original_text(data)
-
-        # Handle lists by taking the first item if it's the only item
-        if isinstance(data, list):
-            if not data:
-                raise APIResponseError("Received empty list in API response")
-            if len(data) > 1:
-                print(f"Warning: Received {len(data)} items in response, only processing the first one")
-            data = data[0]
-
-        # Handle TextContent-like objects
-        if hasattr(data, 'text') and hasattr(data, 'type'):
-            try:
-                data = pyjson.loads(data.text)
-            except (pyjson.JSONDecodeError, TypeError) as e:
-                raise APIResponseError(f"Failed to parse JSON from TextContent: {str(e)}\nOriginal content: {original_text}")
-        # Handle string/bytes input
-        elif isinstance(data, (str, bytes, bytearray)):
-            try:
-                data = pyjson.loads(data)
-            except (pyjson.JSONDecodeError, TypeError) as e:
-                raise APIResponseError(f"Failed to parse JSON: {str(e)}\nOriginal content: {original_text}")
-
-        # If we have a model type to validate against
-        if model_type is not None:
-            # Handle list types like List[SearchPublicationItem]
-            if hasattr(model_type, '__origin__') and get_origin(model_type) is list:
-                if not isinstance(data, list):
-                    raise APIResponseError(f"Expected a list, got {type(data).__name__}\nOriginal content: {original_text}")
-                item_type = get_args(model_type)[0]
-                if hasattr(item_type, '__annotations__'):  # List[TypedDict]
-                    return [item_type(**item) if isinstance(item, dict) else item for item in data]
-                return data
-            # Handle TypedDict
-            elif hasattr(model_type, '__annotations__'):
-                if not isinstance(data, dict):
-                    raise APIResponseError(f"Expected a dictionary, got {type(data).__name__}\nOriginal content: {original_text}")
-                result = {}
-                for field, field_type in get_type_hints(model_type).items():
-                    if field in data:
-                        try:
-                            result[field] = _convert_value(data[field], field_type)
-                        except (ValueError, TypeError) as e:
-                            raise APIResponseError(f"Failed to convert field '{field}': {str(e)}\nOriginal content: {original_text}")
-                    elif field in getattr(model_type, '__required_keys__', set()):
-                        raise APIResponseError(f"Missing required field: {field}\nOriginal content: {original_text}")
-                return model_type(**result)
-
-        return data
-
-    def _convert_value(value: Any, target_type: type) -> Any:
-        """Convert a value to the target type if necessary."""
-        if value is None:
-            return None
-
-        # Handle primitive types
-        if target_type in (str, int, float, bool):
-            try:
-                return target_type(value)
-            except (ValueError, TypeError) as e:
-                raise ValueError(f"Cannot convert {value!r} to {target_type.__name__}")
-
-        # Handle generic types like List, Dict, etc.
-        if hasattr(target_type, '__origin__'):
-            origin = get_origin(target_type)
-            args = get_args(target_type)
-
-            if origin is list and isinstance(value, list):
-                item_type = args[0] if args else type(value[0]) if value else str
-                return [_convert_value(item, item_type) for item in value]
-
-            elif origin is dict and isinstance(value, dict):
-                key_type, value_type = args if len(args) == 2 else (str, type(next(iter(value.values()))) if value else str)
-                return {_convert_value(k, key_type): _convert_value(v, value_type)
-                       for k, v in value.items()}
-
-            elif origin is Union:  # Handle Optional[Type] which is Union[Type, None]
-                non_none_types = [t for t in args if t is not type(None)]
-                if non_none_types:
-                    return _convert_value(value, non_none_types[0])
-
-        # Handle nested TypedDict
-        elif hasattr(target_type, '__annotations__'):
-            return parse_json_content(value, target_type)
-
-        return value
-
-    try:
-        return _parse(content)
-    except APIResponseError:
-        raise
-    except Exception as e:
-        raise APIResponseError(f"Error parsing content: {str(e)}") from e
 
 
 class Settings(BaseSettings):
@@ -170,6 +47,43 @@ def create_authenticated_client() -> Client:
     )
 
 
+client = create_authenticated_client()
+
+
+def _parse_and_validate(result: Any, model_type: type) -> Any:
+    """Parse JSON content and validate with Pydantic model.
+
+    Args:
+        result: Raw result from MCP client
+        model_type: Pydantic model type to validate against
+
+    Returns:
+        Validated data as dict/list
+    """
+    # Handle list containing TextContent objects (common MCP response format)
+    if isinstance(result, list) and len(result) == 1 and hasattr(result[0], 'text') and hasattr(result[0], 'type'):
+        data = json.loads(result[0].text)
+    # Handle TextContent-like objects directly
+    elif hasattr(result, 'text') and hasattr(result, 'type'):
+        data = json.loads(result.text) # type: ignore
+    elif isinstance(result, (str, bytes, bytearray)):
+        data = json.loads(result)
+    else:
+        data = result
+
+    # Handle list types like List[SearchPublicationItem]
+    if hasattr(model_type, '__origin__') and model_type.__origin__ is list:
+        if not isinstance(data, list):
+            raise APIResponseError(f"Expected a list, got {type(data).__name__}")
+        item_type = model_type.__args__[0]
+        validated_items = [item_type.model_validate(item) for item in data]
+        return [item.model_dump() for item in validated_items]
+    else:
+        # Use Pydantic v2's model_validate for validation
+        validated_model = model_type.model_validate(data)
+        return validated_model.model_dump()
+
+
 # Async functions
 async def async_list_tools() -> list[dict]:
     """List all available tools from the MCP server.
@@ -177,7 +91,6 @@ async def async_list_tools() -> list[dict]:
     Returns:
         List[dict]: List of available tools as dictionaries
     """
-    client = create_authenticated_client()
     async with client:
         result = await client.list_tools()
         # Return tools as dictionaries to avoid validation issues
@@ -190,7 +103,6 @@ async def async_list_resources():
     Returns:
         List of available resources
     """
-    client = create_authenticated_client()
     async with client:
         result = await client.list_resources()
         return result
@@ -199,7 +111,7 @@ async def async_list_resources():
 async def async_search_publications(
     query: str,
     external_ids: Optional[Union[str, List[str]]] = None
-) -> SearchPublicationsResponse:
+) -> List[dict]:
     """Search for publications using the call_tool method.
 
     Args:
@@ -212,36 +124,31 @@ async def async_search_publications(
     Raises:
         APIResponseError: If the API response format is unexpected
     """
-    client = create_authenticated_client()
-    try:
-        # Initialize params with query
-        params: Dict[str, Any] = {"query": query}
+    # Initialize params with query
+    params: Dict[str, Any] = {"query": query}
 
-        # Add external_ids to params if provided
-        if external_ids:
-            if isinstance(external_ids, str):
-                params["external_ids"] = [external_ids]
-            else:
-                params["external_ids"] = external_ids
+    # Add external_ids to params if provided
+    if external_ids:
+        if isinstance(external_ids, str):
+            params["external_ids"] = [external_ids]
+        else:
+            params["external_ids"] = external_ids
 
-        async with client:
-            result = await client.call_tool("search_publications", params)
-            # print(f"Result: {result}")
-            # Parse the result as a list of SearchPublicationItem
-            parsed = parse_json_content(result, SearchPublicationsResponse)
-
-            return parsed
-    except Exception as e:
-        if isinstance(e, APIResponseError):
-            raise
-        raise RuntimeError(f"Failed to search publications: {str(e)}") from e
+    async with client:
+        start = time.time()
+        result = await client.call_tool("search_publications", params)
+        # print(f"Result: {result}")
+        # Parse the result as a list of SearchPublicationItem
+        print("[search_publications]", time.time() - start)
+        parsed = _parse_and_validate(result, SearchPublicationsResponse)
+        return parsed
 
 
 async def async_list_publications(
     collection_id: Optional[int] = None,
     limit: Optional[int] = None,
     offset: Optional[int] = None,
-) -> PublicationsResponse:
+) -> dict:
     """List publications with optional filtering using the call_tool method.
 
     Args:
@@ -255,7 +162,6 @@ async def async_list_publications(
     Raises:
         APIResponseError: If the API response format is unexpected
     """
-    client = create_authenticated_client()
     async with client:
         params: Dict[str, Any] = {}
         if collection_id is not None:
@@ -265,14 +171,17 @@ async def async_list_publications(
         if offset is not None:
             params["offset"] = offset
 
+        start = time.time()
         result = await client.call_tool("list_publications", params)
         # Parse the result and ensure it's in the correct PublicationsResponse format
-        parsed = parse_json_content(result, PublicationsResponse)
+        parsed = _parse_and_validate(result, PublicationsResponse)
+        end = time.time()
+        print("[list publications]", end - start)
 
         return parsed
 
 
-async def async_get_publication(publication_id: str) -> Publication:
+async def async_get_publication(publication_id: str) -> dict:
     """Get a single publication by ID using the call_tool method.
 
     Args:
@@ -284,17 +193,16 @@ async def async_get_publication(publication_id: str) -> Publication:
     Raises:
         APIResponseError: If the API response format is unexpected
     """
-    client = create_authenticated_client()
     async with client:
         result = await client.call_tool("get_publication", {"publication_id": publication_id})
-        parsed = parse_json_content(result, Publication)
+        parsed = _parse_and_validate(result, Publication)
         return parsed
 
 
 async def async_list_collections(
     limit: Optional[int] = None,
     offset: Optional[int] = None,
-) -> CollectionsResponse:
+) -> dict:
     """List all collections using the call_tool method.
 
     Args:
@@ -307,18 +215,19 @@ async def async_list_collections(
     Raises:
         APIResponseError: If the API response format is unexpected
     """
-    client = create_authenticated_client()
     async with client:
         params: Dict[str, Any] = {}
         if limit is not None:
             params["limit"] = limit
         if offset is not None:
             params["offset"] = offset
+        start = time.time()
         result = await client.call_tool("list_collections", params)
-        return parse_json_content(result, CollectionsResponse)
+        print("[list_collections]", time.time() - start)
+        return _parse_and_validate(result, CollectionsResponse)
 
 
-async def async_get_collection(collection_id: int) -> Collection:
+async def async_get_collection(collection_id: int) -> dict:
     """Get a single collection by ID using the call_tool method.
 
     Args:
@@ -331,17 +240,10 @@ async def async_get_collection(collection_id: int) -> Collection:
         APIResponseError: If the API response format is unexpected
         ValueError: If the collection is not found
     """
-    client = create_authenticated_client()
     async with client:
-        try:
-            result = await client.call_tool("get_collection", {"collection_id": collection_id})
-            print(f"Debug - Raw API response: {result}")  # Debug log
-            return parse_json_content(result, Collection)
-        except Exception as e:
-            print(f"Debug - Error in async_get_collection: {str(e)}")
-            print(f"Debug - Collection ID: {collection_id}")
-            print(f"Debug - Client settings: {settings.CASHMERE_MCP_SERVER_URL}")
-            raise
+        result = await client.call_tool("get_collection", {"collection_id": collection_id})
+        return _parse_and_validate(result, Collection)
+
 
 async def async_get_usage_report_summary(
     external_ids: Optional[Union[str, List[str]]] = None
@@ -355,14 +257,12 @@ async def async_get_usage_report_summary(
     Returns:
         Usage report summary
     """
-    client = create_authenticated_client()
     async with client:
         params = {}
         if external_ids:
             params["external_ids"] = external_ids if isinstance(external_ids, list) else [external_ids]
         result = await client.call_tool("get_usage_report_summary", params or {})
-        print(f"Debug - Raw API response: {result}")  # Debug log
-        return cast(Dict[str, Any], parse_json_content(result))
+        return json.loads(result[0].text)
 
 
 # Synchronous wrappers for backward compatibility
@@ -383,7 +283,7 @@ def list_resources():
 def search_publications(
     query: str,
     external_ids: Optional[Union[str, List[str]]] = None
-) -> SearchPublicationsResponse:
+) -> List[dict]:
     """Synchronously search for publications."""
     return asyncio.run(async_search_publications(query, external_ids))
 
@@ -392,7 +292,7 @@ def list_publications(
     collection_id: Optional[int] = None,
     limit: Optional[int] = None,
     offset: Optional[int] = None,
-) -> PublicationsResponse:
+) -> dict:
     """Synchronously list publications.
 
     Args:
@@ -406,7 +306,7 @@ def list_publications(
     return asyncio.run(async_list_publications(collection_id, limit, offset))
 
 
-def get_publication(publication_id: str) -> Publication:
+def get_publication(publication_id: str) -> dict:
     """Synchronously get a single publication."""
     return asyncio.run(async_get_publication(publication_id))
 
@@ -414,12 +314,12 @@ def get_publication(publication_id: str) -> Publication:
 def list_collections(
     limit: Optional[int] = None,
     offset: Optional[int] = None,
-) -> CollectionsResponse:
+) -> dict:
     """Synchronously list all collections."""
     return asyncio.run(async_list_collections(limit, offset))
 
 
-def get_collection(collection_id: int) -> Collection:
+def get_collection(collection_id: int) -> dict:
     """Synchronously get a single collection."""
     return asyncio.run(async_get_collection(collection_id))
 
@@ -481,65 +381,60 @@ def main() -> None:
 
     args = parser.parse_args()
 
-    try:
-        if args.command == "list-tools":
-            tools = list_tools()
-            print(f"{len(tools)} available tools:")
-            for tool in tools:
-                print(f"- {tool['name']}")
+    if args.command == "list-tools":
+        tools = list_tools()
+        print(f"{len(tools)} available tools:")
+        for tool in tools:
+            print(f"- {tool['name']}")
 
-        elif args.command == "list-resources":
-            resources = list_resources()
-            print(f"{len(resources)} available resources:")
-            for resource in resources:
-                # Use attribute access for Resource objects
-                name = getattr(resource, 'name', 'Unnamed')
-                print(f"- {name}")
+    elif args.command == "list-resources":
+        resources = list_resources()
+        print(f"{len(resources)} available resources:")
+        for resource in resources:
+            # Use attribute access for Resource objects
+            name = getattr(resource, 'name', 'Unnamed')
+            print(f"- {name}")
 
-        elif args.command == "search":
-            results: SearchPublicationsResponse = search_publications(args.query, args.external_ids)
-            print(f"Found {len(results)} results:")
-            for i, result in enumerate(results, 1):
-                print(f"{i}. {result.get('omnipub_title', 'Untitled')} - {result.get('content', '')[:50]}...")
+    elif args.command == "search":
+        start = time.time()
+        results = search_publications(args.query, args.external_ids)
+        end = time.time()
+        print("time", end - start)
+        print(f"Found {len(results)} results:")
+        for i, result in enumerate(results, 1):
+            print(f"{i}. {result.get('omnipub_title', 'Untitled')} - {result.get('content', '')[:50]}...")
 
-        elif args.command == "list-publications":
-            response: PublicationsResponse = list_publications(
-                collection_id=args.collection_id,
-                limit=args.limit,
-                offset=args.offset
-            )
-            print(f"Found {response.get('count', 0)} publications:")
-            for pub_item in response.get('items', []):
-                pub_data = pub_item.get('data', {})
-                print(f"- {pub_data.get('title', 'Untitled')} ({pub_item.get('uuid', 'No ID')})")
+    elif args.command == "list-publications":
+        response = list_publications(
+            collection_id=args.collection_id,
+            limit=args.limit,
+            offset=args.offset
+        )
+        print(f"Found {response.get('count', 0)} publications:")
+        for pub_item in response.get('items', []):
+            pub_data = pub_item.get('data', {})
+            print(f"- {pub_data.get('title', 'Untitled')} ({pub_item.get('uuid', 'No ID')})")
 
-        elif args.command == "get-publication":
-            pub = get_publication(args.publication_id)
-            print(f"Title: {pub.get('data', {}).get('title', 'Untitled')}")
-            print(f"ID: {pub.get('uuid', 'No ID')}")
+    elif args.command == "get-publication":
+        pub = get_publication(args.publication_id)
+        print(f"Title: {pub.get('data', {}).get('title', 'Untitled')}")
+        print(f"ID: {pub.get('uuid', 'No ID')}")
 
-        elif args.command == "list-collections":
-            collections = list_collections(limit=args.limit, offset=args.offset)
-            print(f"Found {collections['count']} collections:")
-            for coll in collections['items']:
-                print(f"- {coll.get('name', 'Unnamed collection')} (ID: {coll.get('id', '?')})")
+    elif args.command == "list-collections":
+        collections = list_collections(limit=args.limit, offset=args.offset)
+        print(f"Found {collections['count']} collections:")
+        for coll in collections['items']:
+            print(f"- {coll.get('name', 'Unnamed collection')} (ID: {coll.get('id', '?')})")
 
-        elif args.command == "get-collection":
-            coll = get_collection(args.collection_id)
-            print(f"Name: {coll.get('name', 'Unnamed collection')}")
-            print(f"ID: {coll.get('id', '?')}")
-            print(f"Description: {coll.get('description', 'No description')}")
+    elif args.command == "get-collection":
+        coll = get_collection(args.collection_id)
+        print(f"Name: {coll.get('name', 'Unnamed collection')}")
+        print(f"ID: {coll.get('id', '?')}")
+        print(f"Description: {coll.get('description', 'No description')}")
 
-        elif args.command == "usage":
-            usage = get_usage_report_summary(external_ids=args.external_ids)
-            print("Usage report:")
-            for k, v in usage.items():
-                print(f"{k}: {v}")
-
-    except Exception as e:
-        print(f"Error: {str(e)}", file=sys.stderr)
-        sys.exit(1)
-
+    elif args.command == "usage":
+        usage = get_usage_report_summary(external_ids=args.external_ids)
+        print(usage)
 
 if __name__ == "__main__":
     main()
