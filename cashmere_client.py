@@ -18,7 +18,6 @@ from cashmere_types import (
     Publication,
     PublicationsResponse,
     SearchPublicationsResponse,
-    APIResponseError,
 )
 
 
@@ -51,37 +50,30 @@ client = create_authenticated_client()
 
 
 def _parse_and_validate(result: Any, model_type: type) -> Any:
-    """Parse JSON content and validate with Pydantic model.
-
-    Args:
-        result: Raw result from MCP client
-        model_type: Pydantic model type to validate against
-
-    Returns:
-        Validated data as dict/list
-    """
-    # Handle list containing TextContent objects (common MCP response format)
-    if isinstance(result, list) and len(result) == 1 and hasattr(result[0], 'text') and hasattr(result[0], 'type'):
+    """Parse JSON content and validate with Pydantic model."""
+    # Extract text content from various MCP response formats
+    if hasattr(result, 'text'):
+        # Direct TextContent object
+        data = json.loads(result.text)
+    elif isinstance(result, list) and len(result) == 1 and hasattr(result[0], 'text'):
+        # List containing single TextContent object (common MCP format)
         data = json.loads(result[0].text)
-    # Handle TextContent-like objects directly
-    elif hasattr(result, 'text') and hasattr(result, 'type'):
-        data = json.loads(result.text) # type: ignore
     elif isinstance(result, (str, bytes, bytearray)):
+        # Raw string/bytes
         data = json.loads(result)
     else:
+        # Already parsed JSON
         data = result
-
-    # Handle list types like List[SearchPublicationItem]
+    # Handle List[Model] types
     if hasattr(model_type, '__origin__') and model_type.__origin__ is list:
+        # If we expect a list but got a single item, wrap it in a list
         if not isinstance(data, list):
-            raise APIResponseError(f"Expected a list, got {type(data).__name__}")
+            data = [data]
         item_type = model_type.__args__[0]
-        validated_items = [item_type.model_validate(item) for item in data]
-        return [item.model_dump() for item in validated_items]
+        return [item_type.model_validate(item).model_dump() for item in data]
     else:
-        # Use Pydantic v2's model_validate for validation
-        validated_model = model_type.model_validate(data)
-        return validated_model.model_dump()
+        # Single Pydantic model
+        return model_type.model_validate(data).model_dump()
 
 
 # Async functions
