@@ -1,5 +1,5 @@
 import asyncio
-import json as pyjson
+import json
 import random
 import sys
 import time
@@ -40,8 +40,8 @@ async def test_requests_per_second(
 
     try:
         with open("sample_search_queries.json") as f:
-            query_pool = pyjson.load(f)["search_queries"]
-    except (FileNotFoundError, pyjson.JSONDecodeError, KeyError) as e:
+            query_pool = json.load(f)["search_queries"]
+    except (FileNotFoundError, json.JSONDecodeError, KeyError) as e:
         print(f"Warning: Could not load sample queries: {e}. Using fallback queries.")
         query_pool = [f"query {i}" for i in range(100)]
 
@@ -207,8 +207,8 @@ async def load_test(
 
     try:
         with open("sample_search_queries.json") as f:
-            query_pool = pyjson.load(f)["search_queries"]
-    except (FileNotFoundError, pyjson.JSONDecodeError, KeyError) as e:
+            query_pool = json.load(f)["search_queries"]
+    except (FileNotFoundError, json.JSONDecodeError, KeyError) as e:
         print(f"Warning: Could not load sample queries: {e}. Using fallback queries.")
         query_pool = [f"query {i}" for i in range(100)]
 

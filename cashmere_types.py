@@ -61,7 +61,7 @@ class NavItem(BaseModel):
     epub_item_id: str
     section_block_uuid: str
     cfi: str | None = None
-    partition_type: str
+    partition_type: str | None = None
 
 
 class MetadataProperty(BaseModel):
