@@ -377,7 +377,7 @@ def main() -> None:
         tools = list_tools()
         print(f"{len(tools)} available tools:")
         for tool in tools:
-            print(f"- {tool['name']}")
+            print(f"- {tool['name']}: {tool['description']}")
 
     elif args.command == "list-resources":
         resources = list_resources()
