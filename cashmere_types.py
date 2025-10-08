@@ -53,13 +53,13 @@ class CollectionsResponse(BaseModel):
 
 class NavItem(BaseModel):
     level: int
+    order: int
+    section_block_uuid: str
     label: str | None = None
     href: str
     full_href: str
     anchor: str | None = None
-    order: int
-    epub_item_id: str
-    section_block_uuid: str
+    epub_item_id: str | None = None
     cfi: str | None = None
     partition_type: str | None = None
 
