@@ -2,10 +2,11 @@ from pydantic import BaseModel
 
 
 class SearchPublicationItem(BaseModel):
-    embedding_id: str
+    embedding_id: str | int
     content: str
     view_source_url: str | None = None
-    score: float
+    score: float | None = None
+    distance: float | None = None
     omnipub_uuid: str | None = None
     omnipub_title: str | None = None
     section_label: str | None = None
