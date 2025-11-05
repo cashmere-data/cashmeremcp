@@ -36,6 +36,9 @@ The package includes a command-line interface for common operations:
 # List available tools
 python cashmere_client.py list-tools
 
+# Check which tools have output schemas and validate against types
+python cashmere_client.py check-schemas
+
 # Search publications
 python cashmere_client.py search "your search query" --external-ids id1 id2
 
@@ -117,6 +120,19 @@ async def main():
 asyncio.run(main())
 ```
 
+## Schema Validation
+
+The client includes built-in validation to ensure that the MCP server's output schemas match the expected Pydantic types defined in `cashmere_types.py`. Use the `check-schemas` command to:
+
+- **Verify schema compatibility**: Check if tool output schemas match expected types
+- **Identify discrepancies**: Find missing or extra properties between server schemas and client types
+- **Validate type consistency**: Ensure property types match between schemas and models
+
+The validation handles special cases like:
+- Tools that wrap results in container objects (e.g., `search_publications`)
+- Tools with generic schemas that allow additional properties
+- Nullable fields and union types
+
 ## Data Models
 
 The client uses typed dictionaries to represent API responses. The main models are:
@@ -127,6 +143,7 @@ The client uses typed dictionaries to represent API responses. The main models a
 - `Collection`: Collection information
 - `CollectionsResponse`: Paginated collection response
 - `PublicationsResponse`: Paginated publications response
+- `UsageReportSummary`: Usage statistics and report summary
 
 ## Contributing
 
