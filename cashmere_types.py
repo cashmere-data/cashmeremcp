@@ -2,7 +2,7 @@ from pydantic import BaseModel
 
 
 class SearchPublicationItem(BaseModel):
-    embedding_id: str | int
+    embedding_id: str | int | None = None
     content: str
     view_source_url: str | None = None
     score: float | None = None
