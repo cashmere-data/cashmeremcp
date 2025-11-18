@@ -72,7 +72,7 @@ def _pydantic_to_json_schema_properties(model_class) -> dict:
 
 def _validate_tool_schema_against_type(tool_name: str, tool_schema: dict) -> dict:
     """Validate a tool's output schema against its expected Pydantic type.
-    
+
     Returns:
         dict: Validation result with 'valid', 'expected_type', 'issues' keys
     """
@@ -81,27 +81,27 @@ def _validate_tool_schema_against_type(tool_name: str, tool_schema: dict) -> dic
         'expected_type': None,
         'issues': []
     }
-    
+
     if tool_name not in TOOL_TYPE_MAPPING:
         result['valid'] = False
         result['issues'].append(f"No expected type defined for tool '{tool_name}'")
         return result
-    
+
     expected_type = TOOL_TYPE_MAPPING[tool_name]
     result['expected_type'] = expected_type.__name__
-    
+
     # Get expected properties from Pydantic model
     expected_properties = _pydantic_to_json_schema_properties(expected_type)
-    
+
     # Get actual properties from tool schema
     actual_properties = tool_schema.get('properties', {})
-    
+
     # Handle tools with generic schemas (like list_publications)
     if not actual_properties and tool_schema.get('additionalProperties') is True:
         result['issues'].append("Tool has generic schema with no specific properties defined")
         # For generic schemas, we can't validate structure but we note it
         return result
-    
+
     # Special handling for search_publications which wraps results in a "result" array
     if tool_name == 'search_publications' and 'result' in actual_properties:
         # Extract the array item schema from the result property
@@ -115,30 +115,30 @@ def _validate_tool_schema_against_type(tool_name: str, tool_schema: dict) -> dic
                 if ref_name in tool_schema['$defs']:
                     resolved_schema = tool_schema['$defs'][ref_name]
                     actual_properties = resolved_schema.get('properties', {})
-    
+
     # Check for missing properties
     expected_keys = set(expected_properties.keys())
     actual_keys = set(actual_properties.keys())
-    
+
     missing_props = expected_keys - actual_keys
     extra_props = actual_keys - expected_keys
-    
+
     if missing_props:
         result['valid'] = False
         result['issues'].append(f"Missing properties: {', '.join(missing_props)}")
-    
+
     if extra_props:
         result['issues'].append(f"Extra properties: {', '.join(extra_props)}")
-    
+
     # Check property types for common properties
     for prop in expected_keys & actual_keys:
         expected_prop = expected_properties[prop]
         actual_prop = actual_properties[prop]
-        
+
         # Basic type checking (this could be more sophisticated)
         expected_type_info = expected_prop.get('type')
         actual_type_info = actual_prop.get('type')
-        
+
         if expected_type_info != actual_type_info:
             # Handle anyOf cases (nullable fields)
             if 'anyOf' in expected_prop:
@@ -154,7 +154,7 @@ def _validate_tool_schema_against_type(tool_name: str, tool_schema: dict) -> dic
             else:
                 result['valid'] = False
                 result['issues'].append(f"Property '{prop}' type mismatch: expected {expected_type_info}, got {actual_type_info}")
-    
+
     return result
 
 
@@ -448,7 +448,7 @@ def main() -> None:
 
     # List tools
     subparsers.add_parser("list-tools", help="List available tools")
-    
+
     # Check output schemas
     subparsers.add_parser("check-schemas", help="Check which tools have output schemas")
 
@@ -506,11 +506,11 @@ def main() -> None:
         tools = list_tools()
         print("Output Schema Analysis & Type Validation:")
         print("=" * 60)
-        
+
         tools_with_schema = []
         tools_without_schema = []
         validation_results = {}
-        
+
         for tool in tools:
             if 'outputSchema' in tool and tool['outputSchema']:
                 tools_with_schema.append(tool)
@@ -520,46 +520,46 @@ def main() -> None:
                 )
             else:
                 tools_without_schema.append(tool)
-        
+
         print(f"Tools WITH output schemas ({len(tools_with_schema)}):")
         valid_count = 0
         for tool in tools_with_schema:
             schema = tool['outputSchema']
             validation = validation_results[tool['name']]
-            
+
             # Status indicator
             if validation['valid']:
                 status = "✓ VALID"
                 valid_count += 1
             else:
                 status = "⚠ INVALID"
-            
+
             print(f"  {status} {tool['name']}")
             print(f"    Schema Type: {schema.get('type', 'unknown')}")
-            
+
             if validation['expected_type']:
                 print(f"    Expected Type: {validation['expected_type']}")
-            
+
             if 'properties' in schema:
                 print(f"    Properties: {', '.join(schema['properties'].keys())}")
-            
+
             if validation['issues']:
                 print(f"    Issues:")
                 for issue in validation['issues']:
                     print(f"      - {issue}")
-            
+
             print()
-        
+
         print(f"Tools WITHOUT output schemas ({len(tools_without_schema)}):")
         for tool in tools_without_schema:
             print(f"  ✗ {tool['name']}")
-        
+
         print(f"\nSummary:")
         print(f"  - {len(tools_with_schema)}/{len(tools)} tools have output schemas")
         print(f"  - {valid_count}/{len(tools_with_schema)} schemas are valid against expected types")
-        
+
         # Show tools without defined types
-        tools_without_types = [name for name in [t['name'] for t in tools_with_schema] 
+        tools_without_types = [name for name in [t['name'] for t in tools_with_schema]
                               if name not in TOOL_TYPE_MAPPING]
         if tools_without_types:
             print(f"  - Tools without defined types in cashmere_types.py: {', '.join(tools_without_types)}")
