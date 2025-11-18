@@ -221,28 +221,41 @@ def _validate_tool_schema_against_type(tool_name: str, tool_schema: dict) -> dic
 
 def _parse_and_validate(result: Any, model_type: type) -> Any:
     """Parse JSON content and validate with Pydantic model."""
-    # Extract text content from various MCP response formats
-    if hasattr(result, 'text'):
-        # Direct TextContent object
-        data = json.loads(result.text)
-    elif isinstance(result, list) and len(result) == 1 and hasattr(result[0], 'text'):
-        # List containing single TextContent object (common MCP format)
-        data = json.loads(result[0].text)
-    elif isinstance(result, (str, bytes, bytearray)):
+    def _extract_json_data(obj: Any) -> Any:
+        """Extract JSON data from various MCP response formats, handling CallToolResult objects."""
+        # CallToolResult object (from fastmcp) - has content but no text
+        if hasattr(obj, 'content') and not hasattr(obj, 'text'):
+            if isinstance(obj.content, list) and len(obj.content) > 0:
+                # Extract from all items, return single if only one
+                extracted = [_extract_json_data(item) for item in obj.content]
+                return extracted[0] if len(extracted) == 1 else extracted
+            return obj.content
+        # TextContent object or item with text attribute
+        elif hasattr(obj, 'text'):
+            return json.loads(obj.text)
+        # List with single TextContent
+        elif isinstance(obj, list) and len(obj) == 1 and hasattr(obj[0], 'text'):
+            return json.loads(obj[0].text)
         # Raw string/bytes
-        data = json.loads(result)
-    else:
-        # Already parsed JSON
-        data = result
-    # Handle List[Model] types
+        elif isinstance(obj, (str, bytes, bytearray)):
+            return json.loads(obj)
+        # Already parsed JSON or other data structures - clean recursively
+        elif isinstance(obj, list):
+            return [_extract_json_data(item) for item in obj]
+        elif isinstance(obj, dict):
+            return {k: _extract_json_data(v) for k, v in obj.items()}
+        else:
+            return obj
+
+    data = _extract_json_data(result)
+
+    # Validate with Pydantic
     if hasattr(model_type, '__origin__') and model_type.__origin__ is list:
-        # If we expect a list but got a single item, wrap it in a list
         if not isinstance(data, list):
             data = [data]
         item_type = model_type.__args__[0]
         return [item_type.model_validate(item).model_dump() for item in data]
     else:
-        # Single Pydantic model
         return model_type.model_validate(data).model_dump()
 
 
@@ -424,7 +437,7 @@ async def async_get_usage_report_summary(
         if external_ids:
             params["external_ids"] = external_ids if isinstance(external_ids, list) else [external_ids]
         result = await client.call_tool("get_usage_report_summary", params or {})
-        return json.loads(result[0].text)
+        return _parse_and_validate(result, UsageReportSummary)
 
 
 # Synchronous wrappers for backward compatibility
