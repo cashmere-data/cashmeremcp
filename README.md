@@ -22,7 +22,7 @@ pip install -r requirements.txt
 
 Create a `.env.local` file in your project directory with your API credentials:
 ```
-CASHMERE_API_KEY=your_api_key_here
+CASHMERE_API_KEY=your_api_key_here # omit to use OAuth
 CASHMERE_MCP_SERVER_URL=your_server_url_here
 ```
 

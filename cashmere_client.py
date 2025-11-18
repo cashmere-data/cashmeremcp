@@ -44,7 +44,7 @@ def create_authenticated_client() -> Client:
     """
     return Client(
         transport=settings.CASHMERE_MCP_SERVER_URL,
-        auth=BearerAuth(settings.CASHMERE_API_KEY),
+        auth=BearerAuth(settings.CASHMERE_API_KEY) if settings.CASHMERE_API_KEY else "oauth",
     )
 
 
