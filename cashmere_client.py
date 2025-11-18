@@ -490,7 +490,7 @@ def main() -> None:
         print(f"{len(tools)} available tools:")
         for tool in tools:
             print(f"- {tool['name']}")
-            print(f"  Description: {tool['description'][:100]}{'...' if len(tool['description']) > 100 else ''}")
+            print(f"  Description: {tool['description']}")
             # Check if tool has output schema
             if 'outputSchema' in tool and tool['outputSchema']:
                 schema = tool['outputSchema']
