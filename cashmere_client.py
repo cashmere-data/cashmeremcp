@@ -5,6 +5,7 @@ A Python client for interacting with the Cashmere MCP API.
 
 import asyncio
 import json
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 import time
 
@@ -46,6 +47,66 @@ def create_authenticated_client() -> Client:
         transport=settings.CASHMERE_MCP_SERVER_URL,
         auth=BearerAuth(settings.CASHMERE_API_KEY) if settings.CASHMERE_API_KEY else "oauth",
     )
+
+
+def get_oauth_token_location() -> Optional[Path]:
+    home = Path.home()
+    fastmcp_cache_dir = home / ".fastmcp" / "oauth-mcp-client-cache"
+    if not fastmcp_cache_dir.exists():
+        return None
+    # Token files are named based on server URL, e.g., "http_localhost_8001_tokens.json"
+    if settings.CASHMERE_MCP_SERVER_URL:
+        # Convert URL to filename format: http://localhost:8001 -> http_localhost_8001
+        url_normalized = settings.CASHMERE_MCP_SERVER_URL.replace("://", "_")
+        url_normalized = url_normalized.replace(":", "_")
+        url_normalized = url_normalized.replace("/", "_")
+        url_normalized = url_normalized.rstrip("_").replace("__", "_")
+        token_filename = f"{url_normalized}_tokens.json"
+        token_path = fastmcp_cache_dir / token_filename
+        if token_path.exists():
+            return token_path
+    # If no specific match, return the first tokens.json file found
+    for item in fastmcp_cache_dir.iterdir():
+        if item.is_file() and item.name.endswith("_tokens.json"):
+            return item
+    return None
+
+
+def reset_oauth_token() -> bool:
+    token_location = get_oauth_token_location()
+    if token_location and token_location.exists():
+        try:
+            token_location.unlink()
+            return True
+        except Exception as e:
+            print(f"Error deleting token file: {e}")
+            return False
+    return False
+
+
+def get_oauth_token_info() -> Dict[str, Any]:
+    token_location = get_oauth_token_location()
+    info = {
+        "found": False,
+        "location": None,
+        "size": None,
+    }
+    if token_location and token_location.exists():
+        info["found"] = True
+        info["location"] = str(token_location)
+        info["size"] = token_location.stat().st_size
+        try:
+            with open(token_location, "r") as f:
+                token_data = json.load(f)
+                data = token_data["data"]
+                token_payload = data.get("token_payload", {})
+                access_token = token_payload.get("access_token", "")
+                info["expires_at"] = data.get("expires_at", "N/A")
+                info["access_token_preview"] = access_token[:5] if access_token else "N/A"
+                info["keys"] = list(token_payload.keys())
+        except Exception:
+            pass
+    return info
 
 
 client = create_authenticated_client()
@@ -483,6 +544,10 @@ def main() -> None:
     usage_parser = subparsers.add_parser("usage", help="Get usage report")
     usage_parser.add_argument("--external-ids", nargs="+", help="External IDs to filter by")
 
+    # OAuth token management
+    subparsers.add_parser("oauth-token-info", help="Get information about the locally saved OAuth token")
+    subparsers.add_parser("reset-oauth-token", help="Reset/clear the locally saved OAuth token")
+
     args = parser.parse_args()
 
     if args.command == "list-tools":
@@ -613,6 +678,30 @@ def main() -> None:
     elif args.command == "usage":
         usage = get_usage_report_summary(external_ids=args.external_ids)
         print(usage)
+
+    elif args.command == "oauth-token-info":
+        info = get_oauth_token_info()
+        if not info["found"]:
+            print("No OAuth token found locally.")
+            print("Token may not yet be created. Check ~/.fastmcp/oauth-mcp-client-cache/ manually.")
+            return
+        print("OAuth token found:")
+        print(f"  Location: {info['location']}")
+        print(f"  Size: {info['size']} bytes")
+        if "keys" in info:
+            print(f"  Token keys: {', '.join(info['keys'])}")
+        if "expires_at" in info:
+            print(f"  Expires at: {info['expires_at']}")
+        if "access_token_preview" in info:
+            print(f"  Access token: {info['access_token_preview']}...")
+
+    elif args.command == "reset-oauth-token":
+        if reset_oauth_token():
+            print("OAuth token successfully reset/deleted.")
+            print("You will need to re-authenticate on the next client usage.")
+        else:
+            print("No OAuth token found to reset.")
+            print("Token may be stored in a different location or not yet created.")
 
 if __name__ == "__main__":
     main()
