@@ -43,10 +43,15 @@ def create_authenticated_client() -> Client:
     Returns:
         An authenticated Client instance
     """
-    return Client(
-        transport=settings.CASHMERE_MCP_SERVER_URL,
-        auth=BearerAuth(settings.CASHMERE_API_KEY) if settings.CASHMERE_API_KEY else "oauth",
-    )
+    client_kwargs = {}
+    if settings.CASHMERE_API_KEY:
+        client_kwargs["auth"] = BearerAuth(settings.CASHMERE_API_KEY)
+    elif "api_key" in settings.CASHMERE_MCP_SERVER_URL:
+        # server allows this, no auth needed in client
+        pass
+    else:
+        client_kwargs["auth"] = "oauth"
+    return Client(transport=settings.CASHMERE_MCP_SERVER_URL, **client_kwargs)
 
 
 def get_oauth_token_location() -> Optional[Path]:
