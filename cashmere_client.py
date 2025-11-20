@@ -209,6 +209,36 @@ async def async_list_resources():
         return result
 
 
+async def async_get_resource(uri: str):
+    """Get a specific resource from the MCP server.
+
+    Args:
+        uri: The resource URI (e.g., "ui://widget/search-results.html")
+
+    Returns:
+        Resource contents
+    """
+    async with client:
+        result = await client.read_resource(uri)
+        return result
+
+
+async def async_call_tool_raw(tool_name: str, arguments: dict):
+    """Call a tool and return the raw response including metadata.
+
+    Args:
+        tool_name: Name of the tool to call
+        arguments: Arguments to pass to the tool
+
+    Returns:
+        Raw tool response including content, structuredContent, and _meta
+    """
+    async with client:
+        # Use the underlying MCP client to get the raw response
+        result = await client.call_tool(tool_name, arguments)
+        return result
+
+
 async def async_search_publications(
     query: str,
     external_ids: Optional[Union[str, List[str]]] = None
@@ -381,6 +411,31 @@ def list_resources():
     return asyncio.run(async_list_resources())
 
 
+def get_resource(uri: str):
+    """Synchronously get a specific resource.
+
+    Args:
+        uri: The resource URI (e.g., "ui://widget/search-results.html")
+
+    Returns:
+        Resource contents
+    """
+    return asyncio.run(async_get_resource(uri))
+
+
+def call_tool_raw(tool_name: str, arguments: dict):
+    """Synchronously call a tool and return raw response.
+
+    Args:
+        tool_name: Name of the tool to call
+        arguments: Arguments to pass to the tool
+
+    Returns:
+        Raw tool response including metadata
+    """
+    return asyncio.run(async_call_tool_raw(tool_name, arguments))
+
+
 def search_publications(
     query: str,
     external_ids: Optional[Union[str, List[str]]] = None
@@ -455,6 +510,19 @@ def main() -> None:
     # List resources
     subparsers.add_parser("list-resources", help="List available resources")
 
+    # Get resource
+    get_resource_parser = subparsers.add_parser("get-resource", help="Get a specific resource")
+    get_resource_parser.add_argument("uri", help="Resource URI (e.g., ui://widget/search-results.html)")
+
+    # Test tool raw response
+    test_tool_parser = subparsers.add_parser("test-tool", help="Call a tool and show raw response")
+    test_tool_parser.add_argument("tool_name", help="Tool name (e.g., search_publications)")
+    test_tool_parser.add_argument("--query", help="Search query (for search_publications)")
+
+    # Inspect tool metadata
+    inspect_tool_parser = subparsers.add_parser("inspect-tool", help="Inspect a tool's definition including _meta")
+    inspect_tool_parser.add_argument("tool_name", help="Tool name (e.g., search_publications)")
+
     # Search publications
     search_parser = subparsers.add_parser("search", help="Search publications")
     search_parser.add_argument("query", help="Search query")
@@ -500,6 +568,18 @@ def main() -> None:
                     print(f"  Schema Properties: {list(schema['properties'].keys())}")
             else:
                 print(f"  Has Output Schema: No")
+            # Check if tool has input schema
+            if 'inputSchema' in tool and tool['inputSchema']:
+                input_schema = tool['inputSchema']
+                print(f"  Has Input Schema: Yes")
+                print(f"  Schema Type: {input_schema.get('type', 'unknown')}")
+                if 'properties' in input_schema:
+                    print(f"  Schema Properties:")
+                    for prop_name, prop_info in input_schema['properties'].items():
+                        desc = prop_info.get('description', 'No description')
+                        print(f"    - {prop_name}: {desc}")
+            else:
+                print(f"  Has Input Schema: No")
             print()
 
     elif args.command == "check-schemas":
@@ -569,14 +649,100 @@ def main() -> None:
         print(f"{len(resources)} available resources:")
         for resource in resources:
             # Use attribute access for Resource objects
+            uri = getattr(resource, 'uri', 'No URI')
             name = getattr(resource, 'name', 'Unnamed')
-            print(f"- {name}")
+            mime_type = getattr(resource, 'mimeType', 'Unknown')
+            print(f"- {uri}")
+            print(f"  Name: {name}")
+            print(f"  MIME Type: {mime_type}")
+            print()
+
+    elif args.command == "get-resource":
+        resource_data = get_resource(args.uri)
+        print(f"Resource URI: {args.uri}")
+        print("=" * 80)
+
+        # resource_data should be a list of content items
+        if isinstance(resource_data, list):
+            for item in resource_data:
+                # Access attributes from the resource content object
+                uri = getattr(item, 'uri', args.uri)
+                mime_type = getattr(item, 'mimeType', 'unknown')
+                text = getattr(item, 'text', None)
+                blob = getattr(item, 'blob', None)
+
+                print(f"MIME Type: {mime_type}")
+                print()
+
+                if text:
+                    print(text)
+                elif blob:
+                    print(f"[Binary content: {len(blob)} bytes]")
+                else:
+                    print("[No content available]")
+        else:
+            print(resource_data)
+
+    elif args.command == "test-tool":
+        # Build arguments based on tool
+        if args.tool_name == "search_publications":
+            if not args.query:
+                print("Error: --query is required for search_publications")
+                return
+            tool_args = {"query": args.query}
+        else:
+            tool_args = {}
+
+        print(f"Calling tool: {args.tool_name}")
+        print(f"Arguments: {tool_args}")
+        print("=" * 80)
+
+        raw_response = call_tool_raw(args.tool_name, tool_args)
+
+        # Print the raw response structure
+        print("RAW RESPONSE:")
+        print(json.dumps(raw_response, indent=2, default=str))
+
+    elif args.command == "inspect-tool":
+        tools = list_tools()
+        found = False
+        for tool in tools:
+            if tool.get('name') == args.tool_name:
+                found = True
+                print(f"Tool: {args.tool_name}")
+                print("=" * 80)
+
+                # Check for _meta field
+                if '_meta' in tool:
+                    print("\n✓ Tool HAS _meta field:")
+                    print(json.dumps(tool['_meta'], indent=2))
+                else:
+                    print("\n✗ Tool does NOT have _meta field")
+
+                # Show other key fields
+                print("\nOther fields:")
+                print(f"  - description: {tool.get('description', 'N/A')[:100]}...")
+                print(f"  - inputSchema: {'Yes' if tool.get('inputSchema') else 'No'}")
+                print(f"  - outputSchema: {'Yes' if tool.get('outputSchema') else 'No'}")
+
+                if tool.get('annotations'):
+                    print(f"  - annotations: {json.dumps(tool['annotations'], indent=4)}")
+
+                # Show full tool definition
+                print("\nFULL TOOL DEFINITION:")
+                print(json.dumps(tool, indent=2))
+                break
+
+        if not found:
+            print(f"Tool '{args.tool_name}' not found")
+            print(f"Available tools: {', '.join([t.get('name', 'unknown') for t in tools])}")
 
     elif args.command == "search":
         start = time.time()
         results = search_publications(args.query, args.external_ids)
         end = time.time()
         print("time", end - start)
+        print(results)
         print(f"Found {len(results)} results:")
         for i, result in enumerate(results, 1):
             print(f"{i}. {result.get('omnipub_title', 'Untitled')} - {result.get('content', '')[:50]}...")
