@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional, Union
 import time
 
 from fastmcp import Client
-from fastmcp.client.auth import BearerAuth
+from fastmcp.client.auth import BearerAuth, OAuth
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from cashmere_types import (
@@ -43,15 +43,21 @@ def create_authenticated_client() -> Client:
     Returns:
         An authenticated Client instance
     """
-    client_kwargs = {}
+    client_kwargs = {
+        "name": "Cashmere MCP Client",
+        "transport": settings.CASHMERE_MCP_SERVER_URL,
+    }
     if settings.CASHMERE_API_KEY:
         client_kwargs["auth"] = BearerAuth(settings.CASHMERE_API_KEY)
     elif "api_key" in settings.CASHMERE_MCP_SERVER_URL:
         # server allows this, no auth needed in client
         pass
     else:
-        client_kwargs["auth"] = "oauth"
-    return Client(transport=settings.CASHMERE_MCP_SERVER_URL, **client_kwargs)
+        client_kwargs["auth"] = OAuth(
+            mcp_url=settings.CASHMERE_MCP_SERVER_URL,
+            client_name="Cashmere MCP Client",
+        )
+    return Client(**client_kwargs)
 
 
 def get_oauth_token_location() -> Optional[Path]:
