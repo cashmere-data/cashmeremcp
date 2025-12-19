@@ -300,6 +300,20 @@ async def async_list_resources():
         return result
 
 
+async def async_get_resource(uri: str) -> Any:
+    """Get a specific resource by URI from the MCP server.
+
+    Args:
+        uri: The URI of the resource to fetch
+
+    Returns:
+        The resource content and metadata
+    """
+    async with client:
+        result = await client.read_resource(uri)
+        return result
+
+
 async def async_search_publications(
     query: str,
     external_ids: Optional[Union[str, List[str]]] = None
@@ -472,6 +486,11 @@ def list_resources():
     return asyncio.run(async_list_resources())
 
 
+def get_resource(uri: str) -> Any:
+    """Synchronously get a specific resource by URI."""
+    return asyncio.run(async_get_resource(uri))
+
+
 def search_publications(
     query: str,
     external_ids: Optional[Union[str, List[str]]] = None
@@ -545,6 +564,10 @@ def main() -> None:
 
     # List resources
     subparsers.add_parser("list-resources", help="List available resources")
+
+    # Get resource
+    get_resource_parser = subparsers.add_parser("get-resource", help="Get a specific resource by URI")
+    get_resource_parser.add_argument("uri", help="Resource URI (e.g., ui://widget/cashmere-app-v1-search-publications.html)")
 
     # Search publications
     search_parser = subparsers.add_parser("search", help="Search publications")
@@ -683,6 +706,24 @@ def main() -> None:
             # Use attribute access for Resource objects
             name = getattr(resource, 'name', 'Unnamed')
             print(f"- {name}")
+
+    elif args.command == "get-resource":
+        resource = get_resource(args.uri)
+        # Print all metadata from the resource
+        # Handle different response formats (dict, Pydantic model, object with attributes, etc.)
+        if hasattr(resource, 'model_dump'):
+            # Pydantic model
+            resource_dict = resource.model_dump()
+        elif isinstance(resource, dict):
+            # Already a dict
+            resource_dict = resource
+        elif hasattr(resource, '__dict__'):
+            # Object with __dict__
+            resource_dict = vars(resource)
+        else:
+            # Fallback: convert to string representation
+            resource_dict = {"raw": str(resource)}
+        print(json.dumps(resource_dict, indent=2, default=str))
 
     elif args.command == "search":
         start = time.time()
