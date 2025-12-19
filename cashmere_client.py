@@ -717,12 +717,40 @@ def main() -> None:
         elif isinstance(resource, dict):
             # Already a dict
             resource_dict = resource
-        elif hasattr(resource, '__dict__'):
-            # Object with __dict__
-            resource_dict = vars(resource)
+        elif isinstance(resource, list):
+            # Handle list of resources
+            resource_dict = []
+            for item in resource:
+                if hasattr(item, 'model_dump'):
+                    resource_dict.append(item.model_dump())
+                elif isinstance(item, dict):
+                    resource_dict.append(item)
+                else:
+                    # Extract attributes from object
+                    item_dict = {}
+                    for attr in dir(item):
+                        if not attr.startswith('_'):
+                            try:
+                                value = getattr(item, attr)
+                                if not callable(value):
+                                    item_dict[attr] = value
+                            except:
+                                pass
+                    resource_dict.append(item_dict if item_dict else {"raw": str(item)})
         else:
-            # Fallback: convert to string representation
-            resource_dict = {"raw": str(resource)}
+            # Extract attributes from object (handles TextResourceContents, etc.)
+            resource_dict = {}
+            for attr in dir(resource):
+                if not attr.startswith('_'):
+                    try:
+                        value = getattr(resource, attr)
+                        if not callable(value):
+                            resource_dict[attr] = value
+                    except:
+                        pass
+            # If we couldn't extract anything, fall back to string representation
+            if not resource_dict:
+                resource_dict = {"raw": str(resource)}
         print(json.dumps(resource_dict, indent=2, default=str))
 
     elif args.command == "search":
