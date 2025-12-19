@@ -275,12 +275,18 @@ async def async_list_tools() -> list[dict]:
     """List all available tools from the MCP server.
 
     Returns:
-        List[dict]: List of available tools as dictionaries
+        List[dict]: List of available tools as dictionaries, including inputSchema (parameters)
     """
     async with client:
         result = await client.list_tools()
         # Return tools as dictionaries to avoid validation issues
-        return [tool.model_dump() for tool in result]
+        tools = []
+        for tool in result:
+            tool_dict = tool.model_dump()
+            if hasattr(tool, 'inputSchema') and 'inputSchema' not in tool_dict:
+                tool_dict['inputSchema'] = tool.inputSchema
+            tools.append(tool_dict)
+        return tools
 
 
 async def async_list_resources():
@@ -580,6 +586,23 @@ def main() -> None:
         for tool in tools:
             print(f"- {tool['name']}")
             print(f"  Description: {tool['description']}")
+            # Show input schema (parameters)
+            if 'inputSchema' in tool and tool['inputSchema']:
+                input_schema = tool['inputSchema']
+                print(f"  Input Parameters:")
+                if 'properties' in input_schema:
+                    for param_name, param_info in input_schema['properties'].items():
+                        param_type = param_info.get('type', 'unknown')
+                        param_desc = param_info.get('description', '')
+                        required = param_name in input_schema.get('required', [])
+                        required_str = " (required)" if required else " (optional)"
+                        print(f"    - {param_name}: {param_type}{required_str}")
+                        if param_desc:
+                            print(f"        {param_desc}")
+                elif 'type' in input_schema:
+                    print(f"    Type: {input_schema['type']}")
+            else:
+                print(f"  Input Parameters: None")
             # Check if tool has output schema
             if 'outputSchema' in tool and tool['outputSchema']:
                 schema = tool['outputSchema']
