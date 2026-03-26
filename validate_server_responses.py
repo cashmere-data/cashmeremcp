@@ -51,11 +51,13 @@ def get_query():
     return random.choice(query_pool)
 
 
-def test_call(func, *args, **kwargs):
+def test_call(func, *args, extra_result_test = None, **kwargs):
     try:
         logging.info(f"{func.__name__} {args} {kwargs}")
         result = func(*args, **kwargs)
         logging.info(f"{func.__name__} succeeded")
+        if extra_result_test:
+            extra_result_test(result)
         return result
     except Exception as e:
         tb = traceback.format_exc()
@@ -65,8 +67,16 @@ def test_call(func, *args, **kwargs):
         exit(1)
 
 
+def test_dynamic_descriptions(result):
+    # Presence of this string means dynamic collections got applied and
+    # returned by the list_tool call (and that list_tools is active)
+    test_str_from_dynamic_descriptions = "This tool has access to the following collections"
+    if test_str_from_dynamic_descriptions not in str(result):
+        raise Exception("Failed to get dynamic descriptions")
+
+
 def main():
-    test_call(cashmere_client.list_tools)
+    test_call(cashmere_client.list_tools, extra_result_test=test_dynamic_descriptions)
     test_call(cashmere_client.list_resources)
     test_call(cashmere_client.search_publications, query=get_query())
     collections_res = test_call(cashmere_client.list_collections, limit=10, offset=0)
