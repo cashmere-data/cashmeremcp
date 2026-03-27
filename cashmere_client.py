@@ -289,6 +289,24 @@ async def async_list_tools() -> list[dict]:
         return tools
 
 
+async def async_list_tools_with_key(api_key: str) -> list[dict]:
+    """List tools using a specific API key (bypasses module-level client)."""
+    temp_client = Client(
+        name="Cashmere MCP Client",
+        transport=settings.CASHMERE_MCP_SERVER_URL,
+        auth=BearerAuth(api_key),
+    )
+    async with temp_client:
+        result = await temp_client.list_tools()
+        tools = []
+        for tool in result:
+            tool_dict = tool.model_dump()
+            if hasattr(tool, "inputSchema") and "inputSchema" not in tool_dict:
+                tool_dict["inputSchema"] = tool.inputSchema
+            tools.append(tool_dict)
+        return tools
+
+
 async def async_list_resources():
     """List all available resources from the MCP server.
 
@@ -479,6 +497,11 @@ def list_tools() -> list[dict]:
         List[dict]: List of available tools as dictionaries
     """
     return asyncio.run(async_list_tools())
+
+
+def list_tools_with_key(api_key: str) -> list[dict]:
+    """Synchronously list tools using a specific API key (bypasses module-level client)."""
+    return asyncio.run(async_list_tools_with_key(api_key))
 
 
 def list_resources():
