@@ -105,6 +105,7 @@ def test_dynamic_descriptions(result):
     # Presence of this string means dynamic collections got applied and
     # returned by the list_tool call (and that list_tools is active)
     test_str_from_dynamic_descriptions = "This tool has access to the following collections"
+    print(str(result))
     if test_str_from_dynamic_descriptions not in str(result):
         raise Exception("Failed to get dynamic descriptions")
 

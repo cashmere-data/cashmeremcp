@@ -7,7 +7,7 @@ class SearchPublicationItem(BaseModel):
     score: float | None = None
     omnipub_uuid: str | None = None
     omnipub_title: str | None = None
-    section_block_uuid: str
+    section_block_uuid: str | None = None
     section_label: str | None = None
     omnipub_publisher: str | None = None
     omnipub_creators: list[str] | None = None
@@ -20,7 +20,7 @@ SearchPublicationsResponse = list[SearchPublicationItem]
 
 
 class PublicationData(BaseModel):
-    title: str
+    title: str | None = None
     subtitle: str | None = None
     creators: list[str] | None = None
     creation_date: str | None = None
@@ -40,14 +40,14 @@ class PublicationsResponse(BaseModel):
 
 class Collection(BaseModel):
     id: int
-    name: str
+    name: str | None = None
     description: str | None = None
     no_license_required: bool = False
     is_private: bool = True
     subdomain: str | None = None
-    owner_id: int
-    created_at: str
-    updated_at: str
+    owner_id: int | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
     pubs_count: int = 0
     get_pubs_url: str | None = None
 
@@ -81,7 +81,7 @@ class PublicationMetadata(BaseModel):
 
 
 class PublicationDataFull(BaseModel):
-    title: str
+    title: str | None = None
     subtitle: str | None = None
     cover_image: str | None = None
     creators: list[str] | None = None
@@ -97,14 +97,14 @@ class PublicationDataFull(BaseModel):
 class Publication(BaseModel):
     uuid: str
     data: PublicationDataFull
-    license_rights: list[str]
+    license_rights: list[str] | None = None
     external_id: str | None = None
 
 
 class UsageReportSummary(BaseModel):
     tokens_consumed: int
     report_count: int
-    embeddings_count: int
+    embeddings_count: int | None = None
     first_report_date: str | None = None
     last_report_date: str | None = None
 
